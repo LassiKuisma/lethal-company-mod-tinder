@@ -1,4 +1,5 @@
 use std::{
+	collections::{HashMap, HashSet},
 	error::Error,
 	path::Path,
 	time::{Duration, Instant},
@@ -7,7 +8,12 @@ use std::{
 use curl::easy::Easy;
 use serde::Deserialize;
 
+use crate::db::{Database, InsertMod};
+
 pub type Mods = Vec<Mod>;
+
+const CACHE_FILE: &str = "data/mods_cache.json";
+const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
@@ -46,12 +52,59 @@ pub struct ModVersion {
 	pub file_size: i64,
 }
 
-const CACHE_FILE: &str = "data/mods_cache.json";
-const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
+impl Mod {
+	fn to_insertable<'a>(&'a self, categories: &'a HashMap<String, Category>) -> InsertMod<'a> {
+		// assume that the first version in list in the most recent
+		let most_recent = self.versions.first();
+
+		let (description, icon_url) = if let Some(most_recent) = most_recent {
+			(most_recent.description.as_str(), most_recent.icon.as_str())
+		} else {
+			println!(
+				"Faulty entry for mod '{}' (id='{}'): mod info found, but no versions of the mod found.",
+				self.name, self.uuid4
+			);
+
+			("<No description available>", "")
+		};
+
+		let category_ids = self
+			.categories
+			.iter()
+			.map(|ct_name| {
+				let category = categories.get(ct_name);
+				if category.is_none() {
+					println!(
+						"Faulty entry for mod '{}' (id='{}'): can't find category id of '{}'",
+						self.name, self.uuid4, ct_name
+					);
+				}
+				return category;
+			})
+			.filter_map(|option| option)
+			.map(|ct| &ct.id)
+			.collect::<HashSet<_>>();
+
+		InsertMod {
+			uuid4: &self.uuid4,
+			name: &self.name,
+			description,
+			icon_url,
+			full_name: &self.full_name,
+			owner: &self.owner,
+			package_url: &self.package_url,
+			updated_date: &self.date_updated,
+			rating: self.rating_score,
+			is_deprecated: self.is_deprecated,
+			has_nsfw_content: self.has_nsfw_content,
+			category_ids: category_ids,
+		}
+	}
+}
 
 #[allow(dead_code)]
-pub fn refresh_mods(options: ModRefreshOptions) -> Result<(), Box<dyn Error>> {
-	let should_download = match options {
+pub fn refresh_mods(db: &Database, options: ModRefreshOptions) -> Result<(), Box<dyn Error>> {
+	let should_update_cache = match options {
 		ModRefreshOptions::ForceDownload => true,
 		ModRefreshOptions::CacheOnly => false,
 		ModRefreshOptions::DownloadIfExpired(duration) => {
@@ -68,14 +121,20 @@ pub fn refresh_mods(options: ModRefreshOptions) -> Result<(), Box<dyn Error>> {
 		}
 	};
 
-	if should_download {
+	if should_update_cache {
 		println!("Downloading mods from Thunderstore...");
 		let mods_json = load_thunderstore_mods()?;
 		save_mods_to_cache(&mods_json)?;
 		// TODO: update last update date
 	}
 
-	let mods = load_mods_from_cache()?;
+	// do "cache -> db" if we updated cache, or if user requested a cache-only treatment
+	let should_update_db = should_update_cache || options == ModRefreshOptions::CacheOnly;
+
+	if should_update_db {
+		let mods = load_mods_from_cache()?;
+		save_mods_to_db(db, &mods)?;
+	}
 
 	Ok(())
 }
@@ -143,6 +202,7 @@ fn load_mods_from_cache() -> Result<Mods, Box<dyn Error>> {
 }
 
 #[allow(dead_code)]
+#[derive(PartialEq, Eq)]
 pub enum ModRefreshOptions {
 	ForceDownload,
 	CacheOnly,
@@ -156,4 +216,30 @@ impl Default for ModRefreshOptions {
 		let secs = days * secs_in_day;
 		Self::DownloadIfExpired(Duration::from_secs(secs))
 	}
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct Category {
+	pub name: String,
+	pub id: i64,
+}
+
+fn save_mods_to_db(db: &Database, mods: &Vec<Mod>) -> Result<(), Box<dyn Error>> {
+	let category_names = mods
+		.iter()
+		.map(|modd| modd.categories.iter())
+		.flatten()
+		.collect::<HashSet<_>>();
+
+	db.insert_categories(&category_names)?;
+
+	let categories = db
+		.get_categories()?
+		.into_iter()
+		.map(|ct| (ct.name.clone(), ct))
+		.collect::<HashMap<String, Category>>();
+
+	let mods = mods.iter().map(|m| m.to_insertable(&categories)).collect();
+	db.insert_mods(&mods)?;
+	Ok(())
 }
