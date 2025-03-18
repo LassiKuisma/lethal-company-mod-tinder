@@ -1,7 +1,7 @@
 use std::{collections::HashSet, error::Error};
 
 use include_dir::{Dir, include_dir};
-use rusqlite::{Connection, named_params};
+use rusqlite::{Connection, ToSql, params_from_iter};
 use rusqlite_migration::Migrations;
 
 use crate::mods::Category;
@@ -21,15 +21,17 @@ impl Database {
 	}
 
 	pub fn insert_categories(&self, categories: &HashSet<&String>) -> Result<(), Box<dyn Error>> {
-		let mut statement = self
-			.connection
-			.prepare("INSERT OR IGNORE INTO Categories(name) VALUES (:name);")?;
-
-		for name in categories.iter() {
-			statement.execute(named_params! {
-				":name": name
-			})?;
+		if categories.len() == 0 {
+			return Ok(());
 		}
+
+		let sql = format!(
+			"INSERT OR IGNORE INTO Categories(name) VALUES {};",
+			repeat_vars(categories.len(), 1)
+		);
+
+		let mut statement = self.connection.prepare(&sql)?;
+		statement.execute(params_from_iter(categories.iter()))?;
 
 		Ok(())
 	}
@@ -53,43 +55,79 @@ impl Database {
 
 	pub fn insert_mods(&self, mods: &Vec<InsertMod>) -> Result<(), Box<dyn Error>> {
 		self.clear_categories_junction_table()?;
-		self.insert_mods_data(mods)?;
+
+		let chunk_size = 10000;
+		let mod_chunks = mods.chunks(chunk_size);
+		let mod_chunks_count = mod_chunks.len();
+
+		for (index, chunk) in mod_chunks.enumerate() {
+			println!("Inserting mods chunk {}/{}", index + 1, mod_chunks_count);
+
+			self.insert_mods_data(&chunk.iter().collect())?;
+		}
+
+		let mod_categories = mods
+			.iter()
+			.map(|m| {
+				m.category_ids.iter().map(|c_id| InsertModCategory {
+					mod_id: m.uuid4,
+					category_id: &c_id,
+				})
+			})
+			.flatten()
+			.collect::<Vec<_>>();
+
+		let category_chunks = mod_categories.chunks(chunk_size);
+		let category_chunks_count = category_chunks.len();
+		for (index, chunk) in category_chunks.enumerate() {
+			println!(
+				"Inserting mod category junction chunk {}/{}",
+				index + 1,
+				category_chunks_count
+			);
+
+			self.insert_mod_category_junction_data(&chunk.iter().collect())?;
+		}
+
 		Ok(())
 	}
 
-	fn insert_mods_data(&self, mods: &Vec<InsertMod>) -> Result<(), Box<dyn Error>> {
-		let mut insert_mod = self.connection.prepare(
-			r#"INSERT OR REPLACE INTO Mods
-			(id,   name,  description,  iconUrl,  fullName,  owner,  packageUrl,  updatedDate,  rating,  deprecated,  nsfw) VALUES
-			(:id, :name, :description, :iconUrl, :fullName, :owner, :packageUrl, :updatedDate, :rating, :deprecated, :nsfw);"#
-			)?;
-
-		let mut insert_category = self.connection.prepare(
-			"INSERT OR IGNORE INTO ModCategory (modId, categoryId) VALUES (:modId, :categoryId);",
-		)?;
-
-		for m in mods.iter() {
-			insert_mod.execute(named_params! {
-				":id": m.uuid4,
-				":name": m.name,
-				":description": m.description,
-				":iconUrl": m.icon_url,
-				":fullName": m.full_name,
-				":owner": m.owner,
-				":packageUrl": m.package_url,
-				":updatedDate": m.updated_date,
-				":rating": m.rating,
-				":deprecated": m.is_deprecated,
-				":nsfw": m.has_nsfw_content,
-			})?;
-
-			for category_id in m.category_ids.iter() {
-				insert_category.execute(named_params! {
-					":modId": m.uuid4,
-					":categoryId": category_id,
-				})?;
-			}
+	fn insert_mods_data(&self, mods: &Vec<&InsertMod>) -> Result<(), Box<dyn Error>> {
+		if mods.len() == 0 {
+			return Ok(());
 		}
+
+		let sql = format!(
+			r#"INSERT OR REPLACE INTO Mods
+			(id, name, description, iconUrl, fullName, owner, packageUrl, updatedDate, rating, deprecated, nsfw)
+			VALUES {};"#,
+			repeat_vars(mods.len(), 11)
+		);
+		let mut statement = self.connection.prepare(&sql)?;
+
+		let variables = mods.iter().map(|m| m.get_sql_vars()).flatten();
+		statement.execute(params_from_iter(variables))?;
+
+		Ok(())
+	}
+
+	fn insert_mod_category_junction_data(
+		&self,
+		mod_categories: &Vec<&InsertModCategory>,
+	) -> Result<(), Box<dyn Error>> {
+		if mod_categories.len() == 0 {
+			return Ok(());
+		}
+
+		let sql = format!(
+			"INSERT OR IGNORE INTO ModCategory (modId, categoryId) VALUES {};",
+			repeat_vars(mod_categories.len(), 2)
+		);
+
+		let mut statement = self.connection.prepare(&sql)?;
+		let variables = mod_categories.iter().map(|mc| mc.get_sql_vars()).flatten();
+
+		statement.execute(params_from_iter(variables))?;
 
 		Ok(())
 	}
@@ -121,4 +159,43 @@ pub struct InsertMod<'a> {
 	pub is_deprecated: bool,
 	pub has_nsfw_content: bool,
 	pub category_ids: HashSet<&'a i64>,
+}
+
+impl<'a> InsertMod<'a> {
+	fn get_sql_vars(&self) -> Vec<Box<dyn ToSql + '_>> {
+		vec![
+			Box::new(&self.uuid4),
+			Box::new(&self.name),
+			Box::new(&self.description),
+			Box::new(&self.icon_url),
+			Box::new(&self.full_name),
+			Box::new(&self.owner),
+			Box::new(&self.package_url),
+			Box::new(&self.updated_date),
+			Box::new(&self.rating),
+			Box::new(&self.is_deprecated),
+			Box::new(&self.has_nsfw_content),
+		]
+	}
+}
+
+struct InsertModCategory<'a> {
+	mod_id: &'a String,
+	category_id: &'a i64,
+}
+
+impl<'a> InsertModCategory<'a> {
+	fn get_sql_vars(&self) -> Vec<Box<dyn ToSql + '_>> {
+		vec![Box::new(&self.mod_id), Box::new(&self.category_id)]
+	}
+}
+
+fn repeat_vars(item_count: usize, variable_count: usize) -> String {
+	let mut inner = "?,".repeat(variable_count);
+	// Remove trailing comma
+	inner.pop();
+	let mut outer = format!("({inner}),").repeat(item_count);
+	// Remove trailing comma
+	outer.pop();
+	outer
 }
