@@ -240,3 +240,31 @@ fn repeat_vars(item_count: usize, variable_count: usize) -> String {
 	outer.pop();
 	outer
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn repeating_vars_works_correctly() {
+		assert_eq!(repeat_vars(1, 1), "(?)", "one variable repeated once");
+
+		assert_eq!(
+			repeat_vars(3, 1),
+			"(?),(?),(?)",
+			"one variable repeated many times"
+		);
+
+		assert_eq!(
+			repeat_vars(1, 4),
+			"(?,?,?,?)",
+			"multiple variables repeated once"
+		);
+
+		assert_eq!(
+			repeat_vars(3, 2),
+			"(?,?),(?,?),(?,?)",
+			"multiple variables repeated many times"
+		);
+	}
+}
