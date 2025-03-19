@@ -20,6 +20,47 @@ impl Database {
 		Ok(Database { connection })
 	}
 
+	pub fn get_mods(
+		&self,
+		ignored_categories: HashSet<String>,
+		limit: usize,
+	) -> Result<Vec<String>, Box<dyn Error>> {
+		let where_statement = if ignored_categories.len() != 0 {
+			format!(
+				"WHERE Categories.name NOT IN {}",
+				repeat_vars(ignored_categories.len(), 1)
+			)
+		} else {
+			"".to_string()
+		};
+
+		let sql = format!(
+			r#"SELECT Mods.name
+			FROM Mods
+			JOIN ModCategory ON Mods.id = ModCategory.modId
+			JOIN Categories ON ModCategory.categoryId = Categories.id
+			{where_statement}
+			GROUP BY Mods.id
+			ORDER BY Mods.updatedDate DESC
+			LIMIT ?;"#
+		);
+
+		let mut statement = self.connection.prepare(&sql)?;
+
+		let mut vars = ignored_categories
+			.iter()
+			.map::<Box<dyn ToSql>, _>(|i| Box::new(i))
+			.collect::<Vec<_>>();
+
+		vars.push(Box::new(limit));
+
+		let mods = statement
+			.query_map(params_from_iter(vars), |row| Ok(row.get::<_, String>(0)?))?
+			.collect::<Result<_, _>>()?;
+
+		Ok(mods)
+	}
+
 	pub fn insert_categories(&self, categories: &HashSet<&String>) -> Result<(), Box<dyn Error>> {
 		if categories.len() == 0 {
 			return Ok(());
