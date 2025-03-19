@@ -10,49 +10,55 @@ use serde::Deserialize;
 
 use crate::db::{Database, InsertMod};
 
-pub type Mods = Vec<Mod>;
+type Mods = Vec<ModRaw>;
 
 const CACHE_FILE: &str = "data/mods_cache.json";
 const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
 
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-pub struct Mod {
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct Category {
 	pub name: String,
-	pub full_name: String,
-	pub owner: String,
-	pub package_url: String,
-	pub donation_link: Option<String>,
-	pub date_created: String,
-	pub date_updated: String,
-	pub uuid4: String,
-	pub rating_score: i64,
-	pub is_pinned: bool,
-	pub is_deprecated: bool,
-	pub has_nsfw_content: bool,
-	pub categories: Vec<String>,
-	pub versions: Vec<ModVersion>,
+	pub id: i64,
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-pub struct ModVersion {
-	pub name: String,
-	pub full_name: String,
-	pub description: String,
-	pub icon: String,
-	pub version_number: String,
-	pub dependencies: Vec<String>,
-	pub download_url: String,
-	pub downloads: i64,
-	pub date_created: String,
-	pub website_url: String,
-	pub is_active: bool,
-	pub uuid4: String,
-	pub file_size: i64,
+struct ModRaw {
+	name: String,
+	full_name: String,
+	owner: String,
+	package_url: String,
+	donation_link: Option<String>,
+	date_created: String,
+	date_updated: String,
+	uuid4: String,
+	rating_score: i64,
+	is_pinned: bool,
+	is_deprecated: bool,
+	has_nsfw_content: bool,
+	categories: Vec<String>,
+	versions: Vec<ModVersion>,
 }
 
-impl Mod {
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct ModVersion {
+	name: String,
+	full_name: String,
+	description: String,
+	icon: String,
+	version_number: String,
+	dependencies: Vec<String>,
+	download_url: String,
+	downloads: i64,
+	date_created: String,
+	website_url: String,
+	is_active: bool,
+	uuid4: String,
+	file_size: i64,
+}
+
+impl ModRaw {
 	fn to_insertable<'a>(&'a self, categories: &'a HashMap<String, Category>) -> InsertMod<'a> {
 		// assume that the first version in list in the most recent
 		let most_recent = self.versions.first();
@@ -97,7 +103,7 @@ impl Mod {
 			rating: self.rating_score,
 			is_deprecated: self.is_deprecated,
 			has_nsfw_content: self.has_nsfw_content,
-			category_ids: category_ids,
+			category_ids,
 		}
 	}
 }
@@ -122,8 +128,7 @@ pub fn refresh_mods(db: &Database, options: ModRefreshOptions) -> Result<(), Box
 	};
 
 	if should_update_cache {
-		println!("Downloading mods from Thunderstore...");
-		let mods_json = load_thunderstore_mods()?;
+		let mods_json = load_mods_json()?;
 		save_mods_to_cache(&mods_json)?;
 		// TODO: update last update date
 	}
@@ -144,7 +149,7 @@ fn last_update_date() -> Result<Option<Instant>, Box<dyn Error>> {
 	return Ok(None);
 }
 
-fn load_thunderstore_mods() -> Result<String, Box<dyn Error>> {
+fn load_mods_json() -> Result<String, Box<dyn Error>> {
 	let mut buffer = Vec::new();
 	let mut easy = Easy::new();
 	easy.url(THUNDERSTORE_API_URL)?;
@@ -218,13 +223,7 @@ impl Default for ModRefreshOptions {
 	}
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct Category {
-	pub name: String,
-	pub id: i64,
-}
-
-fn save_mods_to_db(db: &Database, mods: &Vec<Mod>) -> Result<(), Box<dyn Error>> {
+fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>) -> Result<(), Box<dyn Error>> {
 	let category_names = mods
 		.iter()
 		.map(|modd| modd.categories.iter())
