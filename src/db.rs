@@ -4,7 +4,7 @@ use include_dir::{Dir, include_dir};
 use rusqlite::{Connection, ToSql, params_from_iter};
 use rusqlite_migration::Migrations;
 
-use crate::mods::Category;
+use crate::mods::{Category, Mod};
 
 const DB_PATH: &str = "data/db.db";
 
@@ -26,7 +26,7 @@ impl Database {
 		&self,
 		ignored_categories: HashSet<String>,
 		limit: usize,
-	) -> Result<Vec<String>, Box<dyn Error>> {
+	) -> Result<Vec<Mod>, Box<dyn Error>> {
 		let where_statement = if ignored_categories.len() != 0 {
 			format!(
 				"WHERE Categories.name NOT IN {}",
@@ -37,7 +37,7 @@ impl Database {
 		};
 
 		let sql = format!(
-			r#"SELECT Mods.name
+			r#"SELECT Mods.name, Mods.owner, Mods.description, Mods.iconUrl, Mods.packageUrl
 			FROM Mods
 			JOIN ModCategory ON Mods.id = ModCategory.modId
 			JOIN Categories ON ModCategory.categoryId = Categories.id
@@ -57,7 +57,15 @@ impl Database {
 		vars.push(Box::new(limit));
 
 		let mods = statement
-			.query_map(params_from_iter(vars), |row| Ok(row.get::<_, String>(0)?))?
+			.query_map(params_from_iter(vars), |row| {
+				Ok(Mod {
+					name: row.get(0)?,
+					owner: row.get(1)?,
+					description: row.get(2)?,
+					icon: row.get(3)?,
+					package_url: row.get(4)?,
+				})
+			})?
 			.collect::<Result<_, _>>()?;
 
 		Ok(mods)

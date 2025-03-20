@@ -15,6 +15,14 @@ type Mods = Vec<ModRaw>;
 const CACHE_FILE: &str = "data/mods_cache.json";
 const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
 
+pub struct Mod {
+	pub name: String,
+	pub owner: String,
+	pub description: String,
+	pub icon: String,
+	pub package_url: String,
+}
+
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Category {
 	pub name: String,
