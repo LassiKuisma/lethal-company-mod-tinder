@@ -14,6 +14,8 @@ pub struct Database {
 
 impl Database {
 	pub fn open_connection() -> Result<Self, Box<dyn Error>> {
+		assert!(!cfg!(test), "Trying to open db connection in tests");
+
 		let mut connection = Connection::open(DB_PATH)?;
 		apply_migrations(&mut connection)?;
 

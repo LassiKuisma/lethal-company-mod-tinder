@@ -150,6 +150,8 @@ fn last_update_date() -> Result<Option<Instant>, Box<dyn Error>> {
 }
 
 fn load_mods_json() -> Result<String, Box<dyn Error>> {
+	assert!(!cfg!(test), "Trying to load mod cache in tests");
+
 	let mut buffer = Vec::new();
 	let mut easy = Easy::new();
 	easy.url(THUNDERSTORE_API_URL)?;
@@ -191,6 +193,8 @@ fn load_mods_json() -> Result<String, Box<dyn Error>> {
 }
 
 fn save_mods_to_cache(mods_json: &String) -> Result<(), Box<dyn Error>> {
+	assert!(!cfg!(test), "Trying to save mods to cache in tests");
+
 	let path = Path::new(CACHE_FILE);
 	if let Some(parent) = path.parent() {
 		std::fs::create_dir_all(parent)?;
