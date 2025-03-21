@@ -22,11 +22,9 @@ impl Database {
 		Ok(Database { connection })
 	}
 
-	pub fn get_mods(
-		&self,
-		ignored_categories: HashSet<String>,
-		limit: usize,
-	) -> Result<Vec<Mod>, Box<dyn Error>> {
+	pub fn get_mods(&self, options: &ModQueryOptions) -> Result<Vec<Mod>, Box<dyn Error>> {
+		let ignored_categories = &options.ignored_categories;
+
 		let where_statement = if ignored_categories.len() != 0 {
 			format!(
 				"WHERE Categories.name NOT IN {}",
@@ -54,7 +52,7 @@ impl Database {
 			.map::<Box<dyn ToSql>, _>(|i| Box::new(i))
 			.collect::<Vec<_>>();
 
-		vars.push(Box::new(limit));
+		vars.push(Box::new(options.limit));
 
 		let mods = statement
 			.query_map(params_from_iter(vars), |row| {
@@ -251,9 +249,94 @@ fn repeat_vars(item_count: usize, variable_count: usize) -> String {
 	outer
 }
 
+pub struct ModQueryOptions {
+	pub ignored_categories: HashSet<String>,
+	pub limit: usize,
+}
+
+impl Default for ModQueryOptions {
+	fn default() -> Self {
+		Self {
+			ignored_categories: Default::default(),
+			limit: 20,
+		}
+	}
+}
+
+impl ModQueryOptions {
+	#[allow(dead_code)]
+	fn new(ignored_categories: impl IntoIterator<Item = impl ToString>, limit: usize) -> Self {
+		Self {
+			ignored_categories: ignored_categories
+				.into_iter()
+				.map(|s| s.to_string())
+				.collect(),
+			limit,
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	impl Database {
+		fn open_in_memory() -> Database {
+			let mut connection = Connection::open_in_memory().unwrap();
+			apply_migrations(&mut connection).unwrap();
+
+			Database { connection }
+		}
+
+		fn insert_test_data(&self) {
+			let insert_categories = r#"
+			INSERT INTO Categories(id, name) VALUES
+			(0, 'Suits'),
+			(1, 'Music'),
+			(2, 'TV'),
+			(3, 'Items'),
+			(4, 'Misc');
+			"#;
+
+			let insert_mods = r#"
+			INSERT INTO Mods
+			(id,   name,          updatedDate,                   deprecated, nsfw,  description, iconUrl, fullName, owner, packageUrl, rating) VALUES
+			('1',  '1st',         '2025-03-20T10:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('2',  'dep-mod',     '2025-03-20T09:00:00.000000Z', true,       false, '',          '',      '',       '',    '',         0),
+			('3',  'nsfw-mod',    '2025-03-20T08:00:00.000000Z', false,      true,  '',          '',      '',       '',    '',         0),
+			('4',  'dep-nsfw',    '2025-03-20T07:00:00.000000Z', true,       true,  '',          '',      '',       '',    '',         0),
+			('5',  '5th',         '2025-03-09T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('6',  '6th',         '2025-03-08T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('7',  '7th',         '2025-03-07T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('8',  'no-category', '2025-03-06T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('9',  'new-update',  '2025-03-21T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('10', 'old-mod',     '2020-01-01T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0);
+			"#;
+
+			let insert_mod_category = r#"
+			INSERT INTO ModCategory(categoryId, modId) VALUES
+			(1, 5),
+			(1, 6),
+
+			(2, 5),
+
+			(3, 1),
+			(3, 2),
+			(3, 3),
+			(3, 4),
+			(3, 5),
+
+			(4, 1),
+			(4, 5),
+
+			(5, 5);
+			"#;
+
+			self.connection.execute(insert_categories, []).unwrap();
+			self.connection.execute(insert_mods, []).unwrap();
+			self.connection.execute(insert_mod_category, []).unwrap();
+		}
+	}
 
 	#[test]
 	fn repeating_vars_works_correctly() {
@@ -276,5 +359,55 @@ mod tests {
 			"(?,?),(?,?),(?,?)",
 			"multiple variables repeated many times"
 		);
+	}
+
+	#[test]
+	fn querying_mods_without_ignored_categories_returns_them_all() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		let result = db
+			.get_mods(&ModQueryOptions {
+				ignored_categories: Default::default(),
+				limit: 100,
+			})
+			.unwrap();
+
+		let mod_names = result.into_iter().map(|m| m.name).collect::<HashSet<_>>();
+		let expected = vec![
+			"1st",
+			"dep-mod",
+			"nsfw-mod",
+			"dep-nsfw",
+			"5th",
+			"6th",
+			"7th",
+			"8th",
+			"new-update",
+			"old-mod",
+		]
+		.into_iter()
+		.map(|s| s.to_string())
+		.collect::<HashSet<_>>();
+
+		assert_eq!(expected, mod_names);
+	}
+
+	#[test]
+	fn querying_mods_doesnt_return_ignored_categories() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		let result = db
+			.get_mods(&ModQueryOptions::new(vec!["Items", "Misc"], 100))
+			.unwrap();
+
+		let mod_names = result.into_iter().map(|m| m.name).collect::<HashSet<_>>();
+		let expected = vec!["6th", "7th", "8th", "new-update", "old-mod"]
+			.into_iter()
+			.map(|s| s.to_string())
+			.collect::<HashSet<_>>();
+
+		assert_eq!(expected, mod_names);
 	}
 }
