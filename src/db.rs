@@ -28,7 +28,7 @@ impl Database {
 		let where_statement = if ignored_categories.len() != 0 {
 			format!(
 				"WHERE Categories.name NOT IN {}",
-				repeat_vars(ignored_categories.len(), 1)
+				repeat_vars(1, ignored_categories.len())
 			)
 		} else {
 			"".to_string()
