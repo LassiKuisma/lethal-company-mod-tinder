@@ -13,6 +13,8 @@ fn main() {
 		.get_mods(&ModQueryOptions {
 			ignored_categories,
 			limit: 20,
+			include_deprecated: false,
+			include_nsfw: true,
 		})
 		.unwrap();
 

@@ -25,15 +25,31 @@ impl Database {
 	pub fn get_mods(&self, options: &ModQueryOptions) -> Result<Vec<Mod>, Box<dyn Error>> {
 		let ignored_categories = &options.ignored_categories;
 
-		let where_statement = if ignored_categories.len() != 0 {
-			format!(
-				"WHERE Mods.id NOT IN
+		let mut filters = Vec::<String>::new();
+
+		if ignored_categories.len() != 0 {
+			let category_filter = format!(
+				"Mods.id NOT IN
 					(SELECT ModCategory.modId FROM ModCategory
 					JOIN Categories ON Categories.id = ModCategory.categoryId
-					WHERE Categories.name IN {}
-				)",
+					WHERE Categories.name IN {})",
 				repeat_vars(1, ignored_categories.len())
-			)
+			);
+
+			filters.push(category_filter);
+		}
+
+		if !options.include_deprecated {
+			filters.push("Mods.deprecated = false".to_string());
+		}
+
+		if !options.include_nsfw {
+			filters.push("Mods.nsfw = false".to_string());
+		}
+
+		let where_statement = if filters.len() != 0 {
+			let joined = filters.join(" AND ");
+			format!("WHERE {joined}")
 		} else {
 			"".to_string()
 		};
@@ -253,6 +269,8 @@ fn repeat_vars(item_count: usize, variable_count: usize) -> String {
 pub struct ModQueryOptions {
 	pub ignored_categories: HashSet<String>,
 	pub limit: usize,
+	pub include_deprecated: bool,
+	pub include_nsfw: bool,
 }
 
 impl Default for ModQueryOptions {
@@ -260,19 +278,8 @@ impl Default for ModQueryOptions {
 		Self {
 			ignored_categories: Default::default(),
 			limit: 20,
-		}
-	}
-}
-
-impl ModQueryOptions {
-	#[allow(dead_code)]
-	fn new(ignored_categories: impl IntoIterator<Item = impl ToString>, limit: usize) -> Self {
-		Self {
-			ignored_categories: ignored_categories
-				.into_iter()
-				.map(|s| s.to_string())
-				.collect(),
-			limit,
+			include_deprecated: false,
+			include_nsfw: false,
 		}
 	}
 }
@@ -308,7 +315,7 @@ mod tests {
 			('4',  'dep-nsfw',    '2025-03-20T07:00:00.000000Z', true,       true,  '',          '',      '',       '',    '',         0),
 			('5',  '5th',         '2025-03-09T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
 			('6',  '6th',         '2025-03-08T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('7',  '7th',         '2025-03-07T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('7',  'nsfw-2',      '2025-03-07T00:00:00.000000Z', false,      true,  '',          '',      '',       '',    '',         0),
 			('8',  'no-category', '2025-03-06T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
 			('9',  'new-update',  '2025-03-21T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
 			('10', 'old-mod',     '2020-01-01T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0);
@@ -329,14 +336,21 @@ mod tests {
 
 			(4, 1),
 			(4, 5),
-
-			(5, 5);
+			(4, 7);
 			"#;
 
 			self.connection.execute(insert_categories, []).unwrap();
 			self.connection.execute(insert_mods, []).unwrap();
 			self.connection.execute(insert_mod_category, []).unwrap();
 		}
+	}
+
+	fn hashset_of(items: Vec<&str>) -> HashSet<String> {
+		items.into_iter().map(|s| s.to_string()).collect()
+	}
+
+	fn mod_names(mods: Vec<Mod>) -> HashSet<String> {
+		mods.into_iter().map(|m| m.name).collect()
 	}
 
 	#[test]
@@ -363,7 +377,7 @@ mod tests {
 	}
 
 	#[test]
-	fn querying_mods_without_ignored_categories_returns_them_all() {
+	fn querying_mods_without_ignored_categories() {
 		let db = Database::open_in_memory();
 		db.insert_test_data();
 
@@ -371,44 +385,166 @@ mod tests {
 			.get_mods(&ModQueryOptions {
 				ignored_categories: Default::default(),
 				limit: 100,
+				include_deprecated: true,
+				include_nsfw: true,
 			})
 			.unwrap();
 
-		let mod_names = result.into_iter().map(|m| m.name).collect::<HashSet<_>>();
-		let expected = vec![
+		let expected = hashset_of(vec![
 			"1st",
 			"dep-mod",
 			"nsfw-mod",
 			"dep-nsfw",
 			"5th",
 			"6th",
-			"7th",
+			"nsfw-2",
 			"no-category",
 			"new-update",
 			"old-mod",
-		]
-		.into_iter()
-		.map(|s| s.to_string())
-		.collect::<HashSet<_>>();
+		]);
 
+		let mod_names = mod_names(result);
 		assert_eq!(expected, mod_names);
 	}
 
 	#[test]
-	fn querying_mods_doesnt_return_ignored_categories() {
+	fn querying_mods_ignored_categories() {
 		let db = Database::open_in_memory();
 		db.insert_test_data();
 
 		let result = db
-			.get_mods(&ModQueryOptions::new(vec!["Items", "Misc"], 100))
+			.get_mods(&ModQueryOptions {
+				ignored_categories: hashset_of(vec!["Items", "Misc"]),
+				limit: 100,
+				include_deprecated: true,
+				include_nsfw: true,
+			})
 			.unwrap();
 
-		let mod_names = result.into_iter().map(|m| m.name).collect::<HashSet<_>>();
-		let expected = vec!["6th", "7th", "no-category", "new-update", "old-mod"]
-			.into_iter()
-			.map(|s| s.to_string())
-			.collect::<HashSet<_>>();
+		let expected = hashset_of(vec!["6th", "no-category", "new-update", "old-mod"]);
 
+		let mod_names = mod_names(result);
 		assert_eq!(expected, mod_names);
+	}
+
+	#[test]
+	fn querying_mods_allowing_deprecated() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		let result = db
+			.get_mods(&ModQueryOptions {
+				ignored_categories: Default::default(),
+				limit: 100,
+				include_deprecated: true,
+				include_nsfw: false,
+			})
+			.unwrap();
+
+		let expected = hashset_of(vec![
+			"1st",
+			"dep-mod",
+			"5th",
+			"6th",
+			"no-category",
+			"new-update",
+			"old-mod",
+		]);
+
+		let mod_names = mod_names(result);
+		assert_eq!(expected, mod_names);
+	}
+
+	#[test]
+	fn querying_non_deprecated_mods() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		let result = db
+			.get_mods(&ModQueryOptions {
+				ignored_categories: Default::default(),
+				limit: 100,
+				include_deprecated: false,
+				include_nsfw: false,
+			})
+			.unwrap();
+
+		let expected = hashset_of(vec![
+			"1st",
+			"5th",
+			"6th",
+			"no-category",
+			"new-update",
+			"old-mod",
+		]);
+
+		let mod_names = mod_names(result);
+		assert_eq!(expected, mod_names);
+	}
+
+	#[test]
+	fn querying_non_deprecated_mods_ignoring_categories() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		let result = db
+			.get_mods(&ModQueryOptions {
+				ignored_categories: hashset_of(vec!["Music", "Suits"]),
+				limit: 100,
+				include_deprecated: false,
+				include_nsfw: false,
+			})
+			.unwrap();
+
+		let expected = hashset_of(vec!["1st", "no-category", "new-update", "old-mod"]);
+
+		let mod_names = mod_names(result);
+		assert_eq!(expected, mod_names);
+	}
+
+	#[test]
+	fn querying_non_deprecated_nswf_mods_ignoring_categories() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		let result = db
+			.get_mods(&ModQueryOptions {
+				ignored_categories: hashset_of(vec!["TV", "Suits", "Misc"]),
+				limit: 100,
+				include_deprecated: false,
+				include_nsfw: true,
+			})
+			.unwrap();
+
+		let expected = hashset_of(vec![
+			"nsfw-mod",
+			"6th",
+			"no-category",
+			"new-update",
+			"old-mod",
+		]);
+
+		let mod_names = mod_names(result);
+		assert_eq!(expected, mod_names);
+	}
+
+	#[test]
+	fn querying_mods_most_recently_updated_is_first() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		let result = db
+			.get_mods(&ModQueryOptions {
+				ignored_categories: Default::default(),
+				limit: 4,
+				include_deprecated: false,
+				include_nsfw: false,
+			})
+			.unwrap();
+
+		let expected = vec!["new-update", "1st", "5th", "6th"];
+
+		let mods = result.iter().map(|m| m.name.as_str()).collect::<Vec<_>>();
+		assert_eq!(expected, mods);
 	}
 }
