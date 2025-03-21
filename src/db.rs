@@ -27,7 +27,11 @@ impl Database {
 
 		let where_statement = if ignored_categories.len() != 0 {
 			format!(
-				"WHERE Categories.name NOT IN {}",
+				"WHERE Mods.id NOT IN
+					(SELECT ModCategory.modId FROM ModCategory
+					JOIN Categories ON Categories.id = ModCategory.categoryId
+					WHERE Categories.name IN {}
+				)",
 				repeat_vars(1, ignored_categories.len())
 			)
 		} else {
@@ -37,10 +41,7 @@ impl Database {
 		let sql = format!(
 			r#"SELECT Mods.name, Mods.owner, Mods.description, Mods.iconUrl, Mods.packageUrl
 			FROM Mods
-			JOIN ModCategory ON Mods.id = ModCategory.modId
-			JOIN Categories ON ModCategory.categoryId = Categories.id
 			{where_statement}
-			GROUP BY Mods.id
 			ORDER BY Mods.updatedDate DESC
 			LIMIT ?;"#
 		);
@@ -382,7 +383,7 @@ mod tests {
 			"5th",
 			"6th",
 			"7th",
-			"8th",
+			"no-category",
 			"new-update",
 			"old-mod",
 		]
@@ -403,7 +404,7 @@ mod tests {
 			.unwrap();
 
 		let mod_names = result.into_iter().map(|m| m.name).collect::<HashSet<_>>();
-		let expected = vec!["6th", "7th", "8th", "new-update", "old-mod"]
+		let expected = vec!["6th", "7th", "no-category", "new-update", "old-mod"]
 			.into_iter()
 			.map(|s| s.to_string())
 			.collect::<HashSet<_>>();
