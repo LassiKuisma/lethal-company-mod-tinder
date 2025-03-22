@@ -87,7 +87,10 @@ impl Database {
 		Ok(mods)
 	}
 
-	pub fn insert_categories(&self, categories: &HashSet<&String>) -> Result<(), Box<dyn Error>> {
+	pub fn insert_categories(
+		&self,
+		categories: &HashSet<impl ToString>,
+	) -> Result<(), Box<dyn Error>> {
 		if categories.len() == 0 {
 			return Ok(());
 		}
@@ -98,7 +101,7 @@ impl Database {
 		);
 
 		let mut statement = self.connection.prepare(&sql)?;
-		statement.execute(params_from_iter(categories.iter()))?;
+		statement.execute(params_from_iter(categories.iter().map(|s| s.to_string())))?;
 
 		Ok(())
 	}
@@ -609,5 +612,22 @@ mod tests {
 
 		let latest_update = db.latest_mod_update_date().unwrap().unwrap();
 		assert_eq!(new, latest_update);
+	}
+
+	#[test]
+	fn insert_and_query_categories() {
+		let db = Database::open_in_memory();
+		let categories = hashset_of(vec!["Foo", "Bar", "Baz", "Cat", "Dog"]);
+		db.insert_categories(&categories).unwrap();
+
+		let result = db
+			.get_categories()
+			.unwrap()
+			.into_iter()
+			.map(|ctg| ctg.name)
+			.collect::<HashSet<_>>();
+		let expected = hashset_of(vec!["Foo", "Bar", "Baz", "Cat", "Dog"]);
+
+		assert_eq!(expected, result);
 	}
 }
