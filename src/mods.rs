@@ -7,6 +7,7 @@ use std::{
 
 use curl::easy::Easy;
 use serde::Deserialize;
+use time::UtcDateTime;
 
 use crate::db::{Database, InsertMod};
 
@@ -15,6 +16,7 @@ type Mods = Vec<ModRaw>;
 const CACHE_FILE: &str = "data/mods_cache.json";
 const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
 
+#[allow(dead_code)]
 pub struct Mod {
 	pub name: String,
 	pub owner: String,
@@ -122,23 +124,15 @@ pub fn refresh_mods(db: &Database, options: ModRefreshOptions) -> Result<(), Box
 		ModRefreshOptions::ForceDownload => true,
 		ModRefreshOptions::CacheOnly => false,
 		ModRefreshOptions::DownloadIfExpired(duration) => {
-			let last_update = last_update_date()?;
-			let now = Instant::now();
-
-			if let Some(last_update) = last_update {
-				let time_passed = now - last_update;
-				time_passed > duration
-			} else {
-				// no previous value present -> this is first time
-				true
-			}
+			let last_update = db.latest_mod_update_date()?;
+			is_expired(last_update, UtcDateTime::now(), duration)
 		}
 	};
 
 	if should_update_cache {
 		let mods_json = load_mods_json()?;
 		save_mods_to_cache(&mods_json)?;
-		// TODO: update last update date
+		db.set_mods_updated_date(UtcDateTime::now())?;
 	}
 
 	// do "cache -> db" if we updated cache, or if user requested a cache-only treatment
@@ -150,11 +144,6 @@ pub fn refresh_mods(db: &Database, options: ModRefreshOptions) -> Result<(), Box
 	}
 
 	Ok(())
-}
-
-fn last_update_date() -> Result<Option<Instant>, Box<dyn Error>> {
-	// TODO:
-	return Ok(None);
 }
 
 fn load_mods_json() -> Result<String, Box<dyn Error>> {
@@ -216,6 +205,20 @@ fn load_mods_from_cache() -> Result<Mods, Box<dyn Error>> {
 	let str = std::fs::read_to_string(CACHE_FILE)?;
 	let mods = serde_json::from_str(&str)?;
 	Ok(mods)
+}
+
+fn is_expired(
+	last_update: Option<UtcDateTime>,
+	now: UtcDateTime,
+	expiration_duration: Duration,
+) -> bool {
+	if let Some(last_update) = last_update {
+		let time_passed = now - last_update;
+		time_passed > expiration_duration
+	} else {
+		// no previous value present -> this is first time
+		true
+	}
 }
 
 #[allow(dead_code)]

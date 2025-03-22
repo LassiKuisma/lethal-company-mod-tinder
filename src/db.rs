@@ -1,8 +1,9 @@
 use std::{collections::HashSet, error::Error};
 
 use include_dir::{Dir, include_dir};
-use rusqlite::{Connection, ToSql, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, ToSql, params_from_iter};
 use rusqlite_migration::Migrations;
+use time::{UtcDateTime, format_description::well_known::Iso8601};
 
 use crate::mods::{Category, Mod};
 
@@ -202,6 +203,32 @@ impl Database {
 		let mut statement = self.connection.prepare("DELETE FROM ModCategory;")?;
 		statement.execute([])?;
 		Ok(())
+	}
+
+	pub fn latest_mod_update_date(&self) -> Result<Option<UtcDateTime>, Box<dyn Error>> {
+		let mut statement = self
+			.connection
+			.prepare("SELECT date FROM ModsUpdatedDate WHERE ModsUpdatedDate.id = 0;")?;
+
+		let result: Option<String> = statement.query_row([], |row| Ok(row.get(0)?)).optional()?;
+
+		if let Some(date) = result {
+			let date = UtcDateTime::parse(&date, &Iso8601::DEFAULT)?;
+			Ok(Some(date))
+		} else {
+			// query was ok, but no data found -> no updates have been done to db
+			Ok(None)
+		}
+	}
+
+	pub fn set_mods_updated_date(&self, timestamp: UtcDateTime) -> Result<(), Box<dyn Error>> {
+		let mut statement = self
+			.connection
+			.prepare("INSERT INTO ModsUpdatedDate (id, date) VALUES (0, ?);")?;
+
+		let str = timestamp.format(&Iso8601::DEFAULT)?;
+		statement.execute([str])?;
+		return Ok(());
 	}
 }
 
@@ -546,5 +573,41 @@ mod tests {
 
 		let mods = result.iter().map(|m| m.name.as_str()).collect::<Vec<_>>();
 		assert_eq!(expected, mods);
+	}
+
+	#[test]
+	fn get_mod_update_date_from_empty_database() {
+		let db = Database::open_in_memory();
+
+		let last_update = db.latest_mod_update_date().unwrap();
+		assert_eq!(None, last_update);
+	}
+
+	#[test]
+	fn set_and_get_mod_update_date() {
+		let db = Database::open_in_memory();
+
+		let timestamp =
+			UtcDateTime::parse("2025-03-22T12:45:56.001122Z", &Iso8601::DEFAULT).unwrap();
+		db.set_mods_updated_date(timestamp).unwrap();
+
+		let latest_update = db.latest_mod_update_date().unwrap().unwrap();
+		assert_eq!(timestamp, latest_update);
+	}
+
+	#[test]
+	fn set_mod_update_date_multiple_times() {
+		let db = Database::open_in_memory();
+
+		let old = UtcDateTime::parse("2000-01-01T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
+		let mid = UtcDateTime::parse("2002-02-22T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
+		let new = UtcDateTime::parse("2025-03-03T03:03:03.000000Z", &Iso8601::DEFAULT).unwrap();
+
+		db.set_mods_updated_date(old).unwrap();
+		db.set_mods_updated_date(mid).unwrap();
+		db.set_mods_updated_date(new).unwrap();
+
+		let latest_update = db.latest_mod_update_date().unwrap().unwrap();
+		assert_eq!(new, latest_update);
 	}
 }
