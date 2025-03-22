@@ -17,6 +17,7 @@ const CACHE_FILE: &str = "data/mods_cache.json";
 const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
 
 #[allow(dead_code)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub struct Mod {
 	pub name: String,
 	pub owner: String,

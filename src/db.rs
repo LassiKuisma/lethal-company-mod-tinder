@@ -630,4 +630,98 @@ mod tests {
 
 		assert_eq!(expected, result);
 	}
+
+	#[test]
+	fn inserting_and_querying_mods() {
+		let null = "".to_string();
+
+		let db = Database::open_in_memory();
+
+		let category_1 = Category {
+			name: "first category".to_string(),
+			id: 0,
+		};
+
+		let category_2 = Category {
+			name: "second category".to_string(),
+			id: 1,
+		};
+
+		let category_3 = Category {
+			name: "third category".to_string(),
+			id: 2,
+		};
+
+		let m1 = Mod {
+			name: "mod-1".to_string(),
+			owner: "cat".to_string(),
+			description: "first mod".to_string(),
+			icon: "icon-1 url".to_string(),
+			package_url: "package-1 url".to_string(),
+		};
+		let id_1 = "1".to_string();
+		let date_1 = "2025-03-22T19:59:59.012345Z".to_string();
+
+		let m2 = Mod {
+			name: "mod-2".to_string(),
+			owner: "dog".to_string(),
+			description: "second mod".to_string(),
+			icon: "icon-2 url".to_string(),
+			package_url: "package-2 url".to_string(),
+		};
+		let id_2 = "2".to_string();
+		let date_2 = "2025-03-22T22:22:22.222222Z".to_string();
+
+		let mods = vec![
+			InsertMod {
+				uuid4: &id_1,
+				name: &m1.name,
+				description: &m1.description,
+				icon_url: &m1.icon,
+				owner: &m1.owner,
+				package_url: &m1.package_url,
+				full_name: &null,
+				updated_date: &date_1,
+				rating: 12345,
+				is_deprecated: false,
+				has_nsfw_content: false,
+				category_ids: HashSet::from_iter(vec![
+					&category_1.id,
+					&category_2.id,
+					&category_3.id,
+				]),
+			},
+			InsertMod {
+				uuid4: &id_2,
+				name: &m2.name,
+				description: &m2.description,
+				icon_url: &m2.icon,
+				owner: &m2.owner,
+				package_url: &m2.package_url,
+				full_name: &null,
+				updated_date: &date_2,
+				rating: 54321,
+				is_deprecated: true,
+				has_nsfw_content: true,
+				category_ids: HashSet::from_iter(vec![]),
+			},
+		];
+
+		db.insert_mods(&mods).unwrap();
+
+		let mut result = db
+			.get_mods(&ModQueryOptions {
+				ignored_categories: Default::default(),
+				limit: 100,
+				include_deprecated: true,
+				include_nsfw: true,
+			})
+			.unwrap();
+		result.sort_by(|a, b| a.name.cmp(&b.name));
+
+		let mut expected = vec![m1, m2];
+		expected.sort_by(|a, b| a.name.cmp(&b.name));
+
+		assert_eq!(expected, result);
+	}
 }
