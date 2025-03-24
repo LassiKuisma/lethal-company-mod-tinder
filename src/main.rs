@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::{sync::Mutex, time::Duration};
 
 use actix_files::NamedFile;
 use actix_web::{
@@ -18,15 +18,31 @@ async fn main() -> std::io::Result<()> {
 	let db = Database::open_connection().unwrap();
 	let data = Data::new(Mutex::new(db));
 
+	let tera = Data::new(Mutex::new(Tera::new("templates/*.html").unwrap()));
+
+	#[cfg(debug_assertions)]
+	let _debouncer = {
+		println!("Tera hot reloading enabled");
+
+		let tera_clone = tera.clone();
+
+		tera_hot_reload::watch(
+			move || {
+				println!("Reloading Tera templates");
+				tera_clone.lock().unwrap().full_reload().unwrap();
+			},
+			Duration::from_millis(500),
+			vec!["./templates"],
+		)
+	};
+
 	let port = 3000;
 	println!("Starting server on port {port}");
 
 	HttpServer::new(move || {
-		let tera = Data::new(Tera::new("templates/*.html").unwrap());
-
 		App::new()
 			.app_data(data.clone())
-			.app_data(tera)
+			.app_data(tera.clone())
 			.service(favicon)
 			.service(welcome_page)
 			.service(rating_page)
@@ -38,9 +54,11 @@ async fn main() -> std::io::Result<()> {
 }
 
 #[get("/")]
-async fn welcome_page(template: Data<Tera>) -> Result<Html, actix_web::Error> {
+async fn welcome_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
 	let ctx = Context::new();
 	let html = template
+		.lock()
+		.unwrap()
 		.render("index.html", &ctx)
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
 
@@ -48,7 +66,7 @@ async fn welcome_page(template: Data<Tera>) -> Result<Html, actix_web::Error> {
 }
 
 #[get("/rate")]
-async fn rating_page(template: Data<Tera>) -> Result<Html, actix_web::Error> {
+async fn rating_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
 	let mut ctx = Context::new();
 
 	let modd = Mod {
@@ -67,6 +85,8 @@ async fn rating_page(template: Data<Tera>) -> Result<Html, actix_web::Error> {
 	ctx.insert("package_url", &modd.package_url);
 
 	let html = template
+		.lock()
+		.unwrap()
 		.render("rating.html", &ctx)
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
 
