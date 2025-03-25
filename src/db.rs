@@ -340,34 +340,34 @@ mod tests {
 			let insert_mods = r#"
 			INSERT INTO Mods
 			(id,   name,          updatedDate,                   deprecated, nsfw,  description, iconUrl, fullName, owner, packageUrl, rating) VALUES
-			('1',  '1st',         '2025-03-20T10:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('2',  'dep-mod',     '2025-03-20T09:00:00.000000Z', true,       false, '',          '',      '',       '',    '',         0),
-			('3',  'nsfw-mod',    '2025-03-20T08:00:00.000000Z', false,      true,  '',          '',      '',       '',    '',         0),
-			('4',  'dep-nsfw',    '2025-03-20T07:00:00.000000Z', true,       true,  '',          '',      '',       '',    '',         0),
-			('5',  '5th',         '2025-03-09T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('6',  '6th',         '2025-03-08T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('7',  'nsfw-2',      '2025-03-07T00:00:00.000000Z', false,      true,  '',          '',      '',       '',    '',         0),
-			('8',  'no-category', '2025-03-06T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('9',  'new-update',  '2025-03-21T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('10', 'old-mod',     '2020-01-01T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0);
+			('id-1',  '1st',         '2025-03-20T10:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('id-2',  'dep-mod',     '2025-03-20T09:00:00.000000Z', true,       false, '',          '',      '',       '',    '',         0),
+			('id-3',  'nsfw-mod',    '2025-03-20T08:00:00.000000Z', false,      true,  '',          '',      '',       '',    '',         0),
+			('id-4',  'dep-nsfw',    '2025-03-20T07:00:00.000000Z', true,       true,  '',          '',      '',       '',    '',         0),
+			('id-5',  '5th',         '2025-03-09T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('id-6',  '6th',         '2025-03-08T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('id-7',  'nsfw-2',      '2025-03-07T00:00:00.000000Z', false,      true,  '',          '',      '',       '',    '',         0),
+			('id-8',  'no-category', '2025-03-06T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('id-9',  'new-update',  '2025-03-21T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
+			('id-10', 'old-mod',     '2020-01-01T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0);
 			"#;
 
 			let insert_mod_category = r#"
 			INSERT INTO ModCategory(categoryId, modId) VALUES
-			(1, 5),
-			(1, 6),
+			(1, 'id-5'),
+			(1, 'id-6'),
 
-			(2, 5),
+			(2, 'id-5'),
 
-			(3, 1),
-			(3, 2),
-			(3, 3),
-			(3, 4),
-			(3, 5),
+			(3, 'id-1'),
+			(3, 'id-2'),
+			(3, 'id-3'),
+			(3, 'id-4'),
+			(3, 'id-5'),
 
-			(4, 1),
-			(4, 5),
-			(4, 7);
+			(4, 'id-1'),
+			(4, 'id-5'),
+			(4, 'id-7');
 			"#;
 
 			self.connection.execute(insert_categories, []).unwrap();
@@ -659,7 +659,7 @@ mod tests {
 			description: "first mod".to_string(),
 			icon: "icon-1 url".to_string(),
 			package_url: "package-1 url".to_string(),
-			id: "1".to_string(),
+			id: "id-1".to_string(),
 		};
 		let date_1 = "2025-03-22T19:59:59.012345Z".to_string();
 
@@ -669,7 +669,7 @@ mod tests {
 			description: "second mod".to_string(),
 			icon: "icon-2 url".to_string(),
 			package_url: "package-2 url".to_string(),
-			id: "2".to_string(),
+			id: "id-2".to_string(),
 		};
 		let date_2 = "2025-03-22T22:22:22.222222Z".to_string();
 
