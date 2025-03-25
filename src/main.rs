@@ -7,8 +7,8 @@ use actix_web::{
 	post,
 	web::{self, Data, Form, Html},
 };
-use db::Database;
-use mods::{Mod, Rating};
+use db::{Database, ModQueryOptions};
+use mods::{Rating, refresh_mods};
 use serde::Deserialize;
 use tera::{Context, Tera};
 
@@ -18,6 +18,8 @@ mod mods;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 	let db = Database::open_connection().unwrap();
+	refresh_mods(&db, mods::ModRefreshOptions::CacheOnly).unwrap();
+
 	let data = Data::new(Mutex::new(db));
 
 	let tera = Data::new(Mutex::new(Tera::new("templates/*.html").unwrap()));
@@ -69,8 +71,11 @@ async fn welcome_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Er
 }
 
 #[get("/rate")]
-async fn get_rating_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
-	rating_page(template)
+async fn get_rating_page(
+	template: Data<Mutex<Tera>>,
+	db: Data<Mutex<Database>>,
+) -> Result<Html, actix_web::Error> {
+	rating_page(template, db)
 }
 
 #[post("/rating")]
@@ -85,7 +90,7 @@ async fn post_rating(
 
 	println!("Mod {} got rating {}", params.mod_id, params.rating);
 
-	rating_page(template)
+	rating_page(template, db)
 }
 
 #[get("/favicon.ico")]
@@ -105,18 +110,28 @@ async fn default_handler(req_method: Method) -> actix_web::Result<impl Responder
 	}
 }
 
-fn rating_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
+fn rating_page(
+	template: Data<Mutex<Tera>>,
+	db: Data<Mutex<Database>>,
+) -> Result<Html, actix_web::Error> {
 	let mut ctx = Context::new();
 
-	let modd = Mod {
-		name: "Foobar mod".to_string(),
-		owner: "BarBaz".to_string(),
-		description: "This is a mod description".to_string(),
-		icon: "https://gcdn.thunderstore.io/live/repository/icons/ebkr-r2modman-3.1.57.png"
-			.to_string(),
-		package_url: "https://thunderstore.io/c/lethal-company/p/ebkr/r2modman/".to_string(),
-		id: "0123456".to_string(),
+	let options = ModQueryOptions {
+		ignored_categories: Default::default(),
+		limit: 1,
+		include_deprecated: false,
+		include_nsfw: false,
 	};
+
+	let mods = db
+		.lock()
+		.unwrap()
+		.get_mods(&options)
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
+
+	let modd = mods
+		.first()
+		.ok_or_else(|| actix_web::error::ErrorInternalServerError("No mods found"))?;
 
 	ctx.insert("name", &modd.name);
 	ctx.insert("owner", &modd.owner);
