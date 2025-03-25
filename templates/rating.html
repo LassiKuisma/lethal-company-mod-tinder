@@ -5,12 +5,13 @@
     <title>Lethal Company Mod Tinder</title>
   </head>
   <body>
+    <a href="likes">Liked mods</a>
     <h1>{{ name }}</h1>
     <h2>By {{ owner }}</h2>
     <img src="{{ icon_url }}" alt="mod icon" />
     <p>{{ description }}</p>
     <a href="{{ package_url }}">Mod page</a>
-    <form action="/rating" method="post">
+    <form action="/rate" method="post">
       <input name="mod_id" value="{{ mod_id }}" type="hidden" />
       <button type="submit" name="rating" value="Like">Looks good</button>
       <button type="submit" name="rating" value="Dislike">Not interested</button>

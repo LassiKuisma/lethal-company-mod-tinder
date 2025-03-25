@@ -18,7 +18,7 @@ mod mods;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 	let db = Database::open_connection().unwrap();
-	refresh_mods(&db, mods::ModRefreshOptions::CacheOnly).unwrap();
+	//refresh_mods(&db, mods::ModRefreshOptions::CacheOnly).unwrap();
 
 	let data = Data::new(Mutex::new(db));
 
@@ -51,6 +51,7 @@ async fn main() -> std::io::Result<()> {
 			.service(welcome_page)
 			.service(get_rating_page)
 			.service(post_rating)
+			.service(rated_mods)
 			.default_service(web::to(default_handler))
 	})
 	.bind(("127.0.0.1", port))?
@@ -78,7 +79,7 @@ async fn get_rating_page(
 	rating_page(template, db)
 }
 
-#[post("/rating")]
+#[post("/rate")]
 async fn post_rating(
 	params: Form<RatingForm>,
 	template: Data<Mutex<Tera>>,
@@ -88,9 +89,30 @@ async fn post_rating(
 		.unwrap()
 		.insert_mod_rating(&params.mod_id, &params.rating)?;
 
-	println!("Mod {} got rating {}", params.mod_id, params.rating);
-
 	rating_page(template, db)
+}
+
+#[get("/likes")]
+async fn rated_mods(
+	template: Data<Mutex<Tera>>,
+	db: Data<Mutex<Database>>,
+) -> Result<Html, actix_web::Error> {
+	let mods = db
+		.lock()
+		.unwrap()
+		.get_rated_mods(&Rating::Like, 100)
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
+
+	let mut ctx = Context::new();
+	ctx.insert("mods", &mods);
+
+	let html = template
+		.lock()
+		.unwrap()
+		.render("rated_mods.html", &ctx)
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
+
+	Ok(Html::new(html))
 }
 
 #[get("/favicon.ico")]

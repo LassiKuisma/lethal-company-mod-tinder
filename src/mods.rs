@@ -7,7 +7,7 @@ use std::{
 };
 
 use curl::easy::Easy;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 
 use crate::db::{Database, InsertMod};
@@ -18,7 +18,7 @@ const CACHE_FILE: &str = "data/mods_cache.json";
 const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
 
 #[allow(dead_code)]
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq, Serialize)]
 pub struct Mod {
 	pub name: String,
 	pub owner: String,
