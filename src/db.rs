@@ -30,10 +30,10 @@ impl Database {
 
 		if ignored_categories.len() != 0 {
 			let category_filter = format!(
-				"Mods.id NOT IN
-					(SELECT ModCategory.modId FROM ModCategory
-					JOIN Categories ON Categories.id = ModCategory.categoryId
-					WHERE Categories.name IN {})",
+				"mods.id NOT IN
+					(SELECT mod_category.mod_id FROM mod_category
+					JOIN categories ON categories.id = mod_category.category_id
+					WHERE categories.name IN {})",
 				repeat_vars(1, ignored_categories.len())
 			);
 
@@ -41,14 +41,14 @@ impl Database {
 		}
 
 		if !options.include_deprecated {
-			filters.push("Mods.deprecated = false".to_string());
+			filters.push("mods.deprecated = false".to_string());
 		}
 
 		if !options.include_nsfw {
-			filters.push("Mods.nsfw = false".to_string());
+			filters.push("mods.nsfw = false".to_string());
 		}
 
-		filters.push("Mods.id NOT IN (SELECT modId FROM Ratings)".to_string());
+		filters.push("mods.id NOT IN (SELECT mod_id FROM ratings)".to_string());
 
 		let where_statement = if filters.len() != 0 {
 			let joined = filters.join(" AND ");
@@ -58,10 +58,10 @@ impl Database {
 		};
 
 		let sql = format!(
-			r#"SELECT Mods.name, Mods.owner, Mods.description, Mods.iconUrl, Mods.packageUrl, Mods.id
-			FROM Mods
+			r#"SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id
+			FROM mods
 			{where_statement}
-			ORDER BY Mods.updatedDate DESC
+			ORDER BY mods.updated_date DESC
 			LIMIT ?;"#
 		);
 
@@ -99,7 +99,7 @@ impl Database {
 		}
 
 		let sql = format!(
-			"INSERT OR IGNORE INTO Categories(name) VALUES {};",
+			"INSERT OR IGNORE INTO categories(name) VALUES {};",
 			repeat_vars(categories.len(), 1)
 		);
 
@@ -112,7 +112,7 @@ impl Database {
 	pub fn get_categories(&self) -> Result<Vec<Category>, Box<dyn Error>> {
 		let mut statement = self
 			.connection
-			.prepare("SELECT id, name FROM Categories;")?;
+			.prepare("SELECT id, name FROM categories;")?;
 
 		let categories = statement
 			.query_map([], |row| {
@@ -171,8 +171,8 @@ impl Database {
 		}
 
 		let sql = format!(
-			r#"INSERT OR REPLACE INTO Mods
-			(id, name, description, iconUrl, fullName, owner, packageUrl, updatedDate, rating, deprecated, nsfw)
+			r#"INSERT OR REPLACE INTO mods
+			(id, name, description, icon_url, full_name, owner, package_url, updated_date, rating, deprecated, nsfw)
 			VALUES {};"#,
 			repeat_vars(mods.len(), 11)
 		);
@@ -193,7 +193,7 @@ impl Database {
 		}
 
 		let sql = format!(
-			"INSERT OR IGNORE INTO ModCategory (modId, categoryId) VALUES {};",
+			"INSERT OR IGNORE INTO mod_category (mod_id, category_id) VALUES {};",
 			repeat_vars(mod_categories.len(), 2)
 		);
 
@@ -206,7 +206,7 @@ impl Database {
 	}
 
 	fn clear_categories_junction_table(&self) -> Result<(), Box<dyn Error>> {
-		let mut statement = self.connection.prepare("DELETE FROM ModCategory;")?;
+		let mut statement = self.connection.prepare("DELETE FROM mod_category;")?;
 		statement.execute([])?;
 		Ok(())
 	}
@@ -214,7 +214,7 @@ impl Database {
 	pub fn latest_mod_update_date(&self) -> Result<Option<UtcDateTime>, Box<dyn Error>> {
 		let mut statement = self
 			.connection
-			.prepare("SELECT date FROM ModsUpdatedDate WHERE ModsUpdatedDate.id = 0;")?;
+			.prepare("SELECT date FROM mods_updated_date WHERE mods_updated_date.id = 0;")?;
 
 		let result: Option<String> = statement.query_row([], |row| Ok(row.get(0)?)).optional()?;
 
@@ -230,7 +230,7 @@ impl Database {
 	pub fn set_mods_updated_date(&self, timestamp: UtcDateTime) -> Result<(), Box<dyn Error>> {
 		let mut statement = self
 			.connection
-			.prepare("INSERT INTO ModsUpdatedDate (id, date) VALUES (0, ?);")?;
+			.prepare("INSERT INTO mods_updated_date (id, date) VALUES (0, ?);")?;
 
 		let str = timestamp.format(&Iso8601::DEFAULT)?;
 		statement.execute([str])?;
@@ -239,7 +239,7 @@ impl Database {
 
 	pub fn insert_mod_rating(&self, mod_id: &str, rating: &Rating) -> Result<(), Box<dyn Error>> {
 		let mut statement = self.connection.prepare(
-			"INSERT INTO Ratings(modId, ratingId) VALUES (?, (SELECT id FROM RatingType WHERE name = ?));",
+			"INSERT INTO ratings(mod_id, rating_id) VALUES (?, (SELECT id FROM rating_type WHERE name = ?));",
 		)?;
 
 		statement.execute((mod_id, rating.to_string()))?;
@@ -253,11 +253,11 @@ impl Database {
 		limit: usize,
 	) -> Result<Vec<Mod>, Box<dyn Error>> {
 		let mut statement = self.connection.prepare(
-			r#"SELECT Mods.name, Mods.owner, Mods.description, Mods.iconUrl, Mods.packageUrl, Mods.id
-			FROM Mods
-				JOIN Ratings ON Mods.id = Ratings.modId
-				JOIN RatingType on RatingType.id = Ratings.ratingId
-			WHERE RatingType.name = ?
+			r#"SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id
+			FROM mods
+				JOIN ratings ON mods.id = ratings.mod_id
+				JOIN rating_type on rating_type.id = ratings.rating_id
+			WHERE rating_type.name = ?
 			LIMIT ?;"#,
 		)?;
 
@@ -371,7 +371,7 @@ mod tests {
 
 		fn insert_test_data(&self) {
 			let insert_categories = r#"
-			INSERT INTO Categories(id, name) VALUES
+			INSERT INTO categories(id, name) VALUES
 			(0, 'Suits'),
 			(1, 'Music'),
 			(2, 'TV'),
@@ -380,22 +380,22 @@ mod tests {
 			"#;
 
 			let insert_mods = r#"
-			INSERT INTO Mods
-			(id,   name,          updatedDate,                   deprecated, nsfw,  description, iconUrl, fullName, owner, packageUrl, rating) VALUES
-			('id-1',  '1st',         '2025-03-20T10:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('id-2',  'dep-mod',     '2025-03-20T09:00:00.000000Z', true,       false, '',          '',      '',       '',    '',         0),
-			('id-3',  'nsfw-mod',    '2025-03-20T08:00:00.000000Z', false,      true,  '',          '',      '',       '',    '',         0),
-			('id-4',  'dep-nsfw',    '2025-03-20T07:00:00.000000Z', true,       true,  '',          '',      '',       '',    '',         0),
-			('id-5',  '5th',         '2025-03-09T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('id-6',  '6th',         '2025-03-08T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('id-7',  'nsfw-2',      '2025-03-07T00:00:00.000000Z', false,      true,  '',          '',      '',       '',    '',         0),
-			('id-8',  'no-category', '2025-03-06T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('id-9',  'new-update',  '2025-03-21T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0),
-			('id-10', 'old-mod',     '2020-01-01T00:00:00.000000Z', false,      false, '',          '',      '',       '',    '',         0);
+			INSERT INTO mods
+			(id,      name,          updated_date,                  deprecated, nsfw,  description, icon_url, full_name, owner, package_url, rating) VALUES
+			('id-1',  '1st',         '2025-03-20T10:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
+			('id-2',  'dep-mod',     '2025-03-20T09:00:00.000000Z', true,       false, '',          '',       '',        '',    '',          0),
+			('id-3',  'nsfw-mod',    '2025-03-20T08:00:00.000000Z', false,      true,  '',          '',       '',        '',    '',          0),
+			('id-4',  'dep-nsfw',    '2025-03-20T07:00:00.000000Z', true,       true,  '',          '',       '',        '',    '',          0),
+			('id-5',  '5th',         '2025-03-09T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
+			('id-6',  '6th',         '2025-03-08T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
+			('id-7',  'nsfw-2',      '2025-03-07T00:00:00.000000Z', false,      true,  '',          '',       '',        '',    '',          0),
+			('id-8',  'no-category', '2025-03-06T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
+			('id-9',  'new-update',  '2025-03-21T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
+			('id-10', 'old-mod',     '2020-01-01T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0);
 			"#;
 
 			let insert_mod_category = r#"
-			INSERT INTO ModCategory(categoryId, modId) VALUES
+			INSERT INTO mod_category(category_id, mod_id) VALUES
 			(1, 'id-5'),
 			(1, 'id-6'),
 

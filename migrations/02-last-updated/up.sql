@@ -1,4 +1,4 @@
-CREATE TABLE ModsUpdatedDate (
+CREATE TABLE mods_updated_date (
   id    INTEGER PRIMARY KEY ON CONFLICT REPLACE CHECK (id = 0),
   date  DATE NOT NULL
 );
