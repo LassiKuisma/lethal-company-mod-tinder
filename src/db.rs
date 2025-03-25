@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension, ToSql, params_from_iter};
 use rusqlite_migration::Migrations;
 use time::{UtcDateTime, format_description::well_known::Iso8601};
 
-use crate::mods::{Category, Mod};
+use crate::mods::{Category, Mod, Rating};
 
 const DB_PATH: &str = "data/db.db";
 
@@ -47,6 +47,8 @@ impl Database {
 		if !options.include_nsfw {
 			filters.push("Mods.nsfw = false".to_string());
 		}
+
+		filters.push("Mods.id NOT IN (SELECT modId FROM Ratings)".to_string());
 
 		let where_statement = if filters.len() != 0 {
 			let joined = filters.join(" AND ");
@@ -233,6 +235,46 @@ impl Database {
 		let str = timestamp.format(&Iso8601::DEFAULT)?;
 		statement.execute([str])?;
 		return Ok(());
+	}
+
+	pub fn insert_mod_rating(&self, mod_id: &str, rating: &Rating) -> Result<(), Box<dyn Error>> {
+		let mut statement = self.connection.prepare(
+			"INSERT INTO Ratings(modId, ratingId) VALUES (?, (SELECT id FROM RatingType WHERE name = ?));",
+		)?;
+
+		statement.execute((mod_id, rating.to_string()))?;
+
+		Ok(())
+	}
+
+	pub fn get_rated_mods(
+		&self,
+		rating: &Rating,
+		limit: usize,
+	) -> Result<Vec<Mod>, Box<dyn Error>> {
+		let mut statement = self.connection.prepare(
+			r#"SELECT Mods.name, Mods.owner, Mods.description, Mods.iconUrl, Mods.packageUrl, Mods.id
+			FROM Mods
+				JOIN Ratings ON Mods.id = Ratings.modId
+				JOIN RatingType on RatingType.id = Ratings.ratingId
+			WHERE RatingType.name = ?
+			LIMIT ?;"#,
+		)?;
+
+		let mods = statement
+			.query_map((rating.to_string(), limit), |row| {
+				Ok(Mod {
+					name: row.get(0)?,
+					owner: row.get(1)?,
+					description: row.get(2)?,
+					icon: row.get(3)?,
+					package_url: row.get(4)?,
+					id: row.get(5)?,
+				})
+			})?
+			.collect::<Result<_, _>>()?;
+
+		Ok(mods)
 	}
 }
 
@@ -724,5 +766,55 @@ mod tests {
 		expected.sort_by(|a, b| a.name.cmp(&b.name));
 
 		assert_eq!(expected, result);
+	}
+
+	#[test]
+	fn rated_mods_are_omitted_from_queries() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		db.insert_mod_rating("id-5", &Rating::Like).unwrap();
+		db.insert_mod_rating("id-6", &Rating::Dislike).unwrap();
+
+		let result = db
+			.get_mods(&ModQueryOptions {
+				ignored_categories: Default::default(),
+				limit: 100,
+				include_deprecated: true,
+				include_nsfw: true,
+			})
+			.unwrap();
+
+		let mods = mod_names(result);
+		let expected = hashset_of(vec![
+			"1st",
+			"dep-mod",
+			"nsfw-mod",
+			"dep-nsfw",
+			"nsfw-2",
+			"no-category",
+			"new-update",
+			"old-mod",
+		]);
+
+		assert_eq!(expected, mods);
+	}
+
+	#[test]
+	fn querying_rated_mods() {
+		let db = Database::open_in_memory();
+		db.insert_test_data();
+
+		db.insert_mod_rating("id-2", &Rating::Like).unwrap();
+		db.insert_mod_rating("id-3", &Rating::Dislike).unwrap();
+		db.insert_mod_rating("id-4", &Rating::Dislike).unwrap();
+		db.insert_mod_rating("id-5", &Rating::Like).unwrap();
+
+		let result = db.get_rated_mods(&Rating::Like, 100).unwrap();
+
+		let mods = mod_names(result);
+		let expected = hashset_of(vec!["dep-mod", "5th"]);
+
+		assert_eq!(expected, mods);
 	}
 }

@@ -8,7 +8,7 @@ use actix_web::{
 	web::{self, Data, Form, Html},
 };
 use db::Database;
-use mods::Mod;
+use mods::{Mod, Rating};
 use serde::Deserialize;
 use tera::{Context, Tera};
 
@@ -77,8 +77,13 @@ async fn get_rating_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web:
 async fn post_rating(
 	params: Form<RatingForm>,
 	template: Data<Mutex<Tera>>,
+	db: Data<Mutex<Database>>,
 ) -> Result<Html, actix_web::Error> {
-	println!("{:?} for mod {}", params.rating, params.mod_id);
+	db.lock()
+		.unwrap()
+		.insert_mod_rating(&params.mod_id, &params.rating)?;
+
+	println!("Mod {} got rating {}", params.mod_id, params.rating);
 
 	rating_page(template)
 }
@@ -133,10 +138,4 @@ fn rating_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
 struct RatingForm {
 	mod_id: String,
 	rating: Rating,
-}
-
-#[derive(Debug, Deserialize)]
-enum Rating {
-	Like,
-	Dislike,
 }

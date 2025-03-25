@@ -1,6 +1,7 @@
 use std::{
 	collections::{HashMap, HashSet},
 	error::Error,
+	fmt::Display,
 	path::Path,
 	time::{Duration, Instant},
 };
@@ -31,6 +32,18 @@ pub struct Mod {
 pub struct Category {
 	pub name: String,
 	pub id: i64,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy)]
+pub enum Rating {
+	Like,
+	Dislike,
+}
+
+impl Display for Rating {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{:?}", self)
+	}
 }
 
 #[allow(dead_code)]
