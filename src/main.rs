@@ -4,10 +4,12 @@ use actix_files::NamedFile;
 use actix_web::{
 	App, Either, HttpResponse, HttpServer, Responder, get,
 	http::{Method, StatusCode},
-	web::{self, Data, Html},
+	post,
+	web::{self, Data, Form, Html},
 };
 use db::Database;
 use mods::Mod;
+use serde::Deserialize;
 use tera::{Context, Tera};
 
 mod db;
@@ -45,7 +47,8 @@ async fn main() -> std::io::Result<()> {
 			.app_data(tera.clone())
 			.service(favicon)
 			.service(welcome_page)
-			.service(rating_page)
+			.service(get_rating_page)
+			.service(post_rating)
 			.default_service(web::to(default_handler))
 	})
 	.bind(("127.0.0.1", port))?
@@ -66,31 +69,18 @@ async fn welcome_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Er
 }
 
 #[get("/rate")]
-async fn rating_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
-	let mut ctx = Context::new();
+async fn get_rating_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
+	rating_page(template)
+}
 
-	let modd = Mod {
-		name: "Foobar mod".to_string(),
-		owner: "BarBaz".to_string(),
-		description: "This is a mod description".to_string(),
-		icon: "https://gcdn.thunderstore.io/live/repository/icons/ebkr-r2modman-3.1.57.png"
-			.to_string(),
-		package_url: "https://thunderstore.io/c/lethal-company/p/ebkr/r2modman/".to_string(),
-	};
+#[post("/rating")]
+async fn post_rating(
+	params: Form<RatingForm>,
+	template: Data<Mutex<Tera>>,
+) -> Result<Html, actix_web::Error> {
+	println!("{:?} for mod {}", params.rating, params.mod_id);
 
-	ctx.insert("name", &modd.name);
-	ctx.insert("owner", &modd.owner);
-	ctx.insert("icon_url", &modd.icon);
-	ctx.insert("description", &modd.description);
-	ctx.insert("package_url", &modd.package_url);
-
-	let html = template
-		.lock()
-		.unwrap()
-		.render("rating.html", &ctx)
-		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
-
-	Ok(Html::new(html))
+	rating_page(template)
 }
 
 #[get("/favicon.ico")]
@@ -108,4 +98,45 @@ async fn default_handler(req_method: Method) -> actix_web::Result<impl Responder
 		}
 		_ => Ok(Either::Right(HttpResponse::MethodNotAllowed().finish())),
 	}
+}
+
+fn rating_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
+	let mut ctx = Context::new();
+
+	let modd = Mod {
+		name: "Foobar mod".to_string(),
+		owner: "BarBaz".to_string(),
+		description: "This is a mod description".to_string(),
+		icon: "https://gcdn.thunderstore.io/live/repository/icons/ebkr-r2modman-3.1.57.png"
+			.to_string(),
+		package_url: "https://thunderstore.io/c/lethal-company/p/ebkr/r2modman/".to_string(),
+		id: "0123456".to_string(),
+	};
+
+	ctx.insert("name", &modd.name);
+	ctx.insert("owner", &modd.owner);
+	ctx.insert("icon_url", &modd.icon);
+	ctx.insert("description", &modd.description);
+	ctx.insert("package_url", &modd.package_url);
+	ctx.insert("mod_id", &modd.id);
+
+	let html = template
+		.lock()
+		.unwrap()
+		.render("rating.html", &ctx)
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
+
+	Ok(Html::new(html))
+}
+
+#[derive(Deserialize)]
+struct RatingForm {
+	mod_id: String,
+	rating: Rating,
+}
+
+#[derive(Debug, Deserialize)]
+enum Rating {
+	Like,
+	Dislike,
 }

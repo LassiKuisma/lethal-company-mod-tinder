@@ -24,6 +24,7 @@ pub struct Mod {
 	pub description: String,
 	pub icon: String,
 	pub package_url: String,
+	pub id: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]

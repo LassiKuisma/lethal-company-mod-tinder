@@ -10,5 +10,10 @@
     <img src="{{ icon_url }}" alt="mod icon" />
     <p>{{ description }}</p>
     <a href="{{ package_url }}">Mod page</a>
+    <form action="/rating" method="post">
+      <input name="mod_id" value="{{ mod_id }}" type="hidden" />
+      <button type="submit" name="rating" value="Like">Looks good</button>
+      <button type="submit" name="rating" value="Dislike">Not interested</button>
+    </form>
   </body>
 </html>

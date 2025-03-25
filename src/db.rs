@@ -56,7 +56,7 @@ impl Database {
 		};
 
 		let sql = format!(
-			r#"SELECT Mods.name, Mods.owner, Mods.description, Mods.iconUrl, Mods.packageUrl
+			r#"SELECT Mods.name, Mods.owner, Mods.description, Mods.iconUrl, Mods.packageUrl, Mods.id
 			FROM Mods
 			{where_statement}
 			ORDER BY Mods.updatedDate DESC
@@ -80,6 +80,7 @@ impl Database {
 					description: row.get(2)?,
 					icon: row.get(3)?,
 					package_url: row.get(4)?,
+					id: row.get(5)?,
 				})
 			})?
 			.collect::<Result<_, _>>()?;
@@ -658,8 +659,8 @@ mod tests {
 			description: "first mod".to_string(),
 			icon: "icon-1 url".to_string(),
 			package_url: "package-1 url".to_string(),
+			id: "1".to_string(),
 		};
-		let id_1 = "1".to_string();
 		let date_1 = "2025-03-22T19:59:59.012345Z".to_string();
 
 		let m2 = Mod {
@@ -668,13 +669,13 @@ mod tests {
 			description: "second mod".to_string(),
 			icon: "icon-2 url".to_string(),
 			package_url: "package-2 url".to_string(),
+			id: "2".to_string(),
 		};
-		let id_2 = "2".to_string();
 		let date_2 = "2025-03-22T22:22:22.222222Z".to_string();
 
 		let mods = vec![
 			InsertMod {
-				uuid4: &id_1,
+				uuid4: &m1.id,
 				name: &m1.name,
 				description: &m1.description,
 				icon_url: &m1.icon,
@@ -692,7 +693,7 @@ mod tests {
 				]),
 			},
 			InsertMod {
-				uuid4: &id_2,
+				uuid4: &m2.id,
 				name: &m2.name,
 				description: &m2.description,
 				icon_url: &m2.icon,
