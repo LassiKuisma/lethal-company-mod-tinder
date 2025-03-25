@@ -133,7 +133,7 @@ impl Database {
 	pub fn insert_mods(&self, mods: &Vec<InsertMod>) -> Result<(), Box<dyn Error>> {
 		self.clear_categories_junction_table()?;
 
-		let chunk_size = 10000;
+		let chunk_size = 150;
 		let mod_chunks = mods.chunks(chunk_size);
 		let mod_chunks_count = mod_chunks.len();
 
