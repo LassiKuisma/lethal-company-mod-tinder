@@ -4,7 +4,7 @@ use actix_files::NamedFile;
 use actix_web::{
 	App, Either, HttpResponse, HttpServer, Responder, get,
 	http::{Method, StatusCode},
-	post,
+	middleware, post,
 	web::{self, Data, Form, Html},
 };
 use db::{Database, ModQueryOptions};
@@ -17,7 +17,10 @@ mod mods;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+	env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
 	let db = Database::open_connection().unwrap();
+	refresh_mods(&db, mods::ModRefreshOptions::default()).unwrap();
 	//refresh_mods(&db, mods::ModRefreshOptions::CacheOnly).unwrap();
 
 	let data = Data::new(Mutex::new(db));
@@ -26,13 +29,13 @@ async fn main() -> std::io::Result<()> {
 
 	#[cfg(debug_assertions)]
 	let _debouncer = {
-		println!("Tera hot reloading enabled");
+		log::info!("Tera hot reloading enabled");
 
 		let tera_clone = tera.clone();
 
 		tera_hot_reload::watch(
 			move || {
-				println!("Reloading Tera templates");
+				log::info!("Reloading Tera templates");
 				tera_clone.lock().unwrap().full_reload().unwrap();
 			},
 			Duration::from_millis(500),
@@ -41,10 +44,11 @@ async fn main() -> std::io::Result<()> {
 	};
 
 	let port = 3000;
-	println!("Starting server on port {port}");
+	log::info!("Starting server on port {port}");
 
 	HttpServer::new(move || {
 		App::new()
+			.wrap(middleware::Logger::default())
 			.app_data(data.clone())
 			.app_data(tera.clone())
 			.service(favicon)

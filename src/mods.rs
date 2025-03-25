@@ -91,9 +91,10 @@ impl ModRaw {
 		let (description, icon_url) = if let Some(most_recent) = most_recent {
 			(most_recent.description.as_str(), most_recent.icon.as_str())
 		} else {
-			println!(
+			log::error!(
 				"Faulty entry for mod '{}' (id='{}'): mod info found, but no versions of the mod found.",
-				self.name, self.uuid4
+				self.name,
+				self.uuid4
 			);
 
 			("<No description available>", "")
@@ -105,9 +106,11 @@ impl ModRaw {
 			.map(|ct_name| {
 				let category = categories.get(ct_name);
 				if category.is_none() {
-					println!(
+					log::error!(
 						"Faulty entry for mod '{}' (id='{}'): can't find category id of '{}'",
-						self.name, self.uuid4, ct_name
+						self.name,
+						self.uuid4,
+						ct_name
 					);
 				}
 				return category;
@@ -170,6 +173,7 @@ fn load_mods_json() -> Result<String, Box<dyn Error>> {
 	easy.progress(true)?;
 
 	let log_frequency = Duration::from_millis(1000);
+	log::info!("Starting mods json download");
 
 	{
 		let mut last_log = Instant::now();
@@ -192,7 +196,7 @@ fn load_mods_json() -> Result<String, Box<dyn Error>> {
 			} else {
 				0.0
 			};
-			println!("{downloaded} / {total_expected} ({percent}%) downloaded");
+			log::debug!("{downloaded} / {total_expected} ({percent}%) downloaded");
 
 			true
 		})?;
@@ -206,6 +210,8 @@ fn load_mods_json() -> Result<String, Box<dyn Error>> {
 
 fn save_mods_to_cache(mods_json: &String) -> Result<(), Box<dyn Error>> {
 	assert!(!cfg!(test), "Trying to save mods to cache in tests");
+
+	log::debug!("Saving mods json to cache");
 
 	let path = Path::new(CACHE_FILE);
 	if let Some(parent) = path.parent() {
@@ -260,6 +266,7 @@ fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>) -> Result<(), Box<dyn Erro
 		.flatten()
 		.collect::<HashSet<_>>();
 
+	log::info!("Saving mod categories to db");
 	db.insert_categories(&category_names)?;
 
 	let categories = db
@@ -269,6 +276,7 @@ fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>) -> Result<(), Box<dyn Erro
 		.collect::<HashMap<String, Category>>();
 
 	let mods = mods.iter().map(|m| m.to_insertable(&categories)).collect();
+	log::info!("Savings mods to db");
 	db.insert_mods(&mods)?;
 	Ok(())
 }

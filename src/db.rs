@@ -134,7 +134,7 @@ impl Database {
 		let mod_chunks_count = mod_chunks.len();
 
 		for (index, chunk) in mod_chunks.enumerate() {
-			println!("Inserting mods chunk {}/{}", index + 1, mod_chunks_count);
+			log::debug!("Inserting mods chunk {}/{}", index + 1, mod_chunks_count);
 
 			self.insert_mods_data(&chunk.iter().collect())?;
 		}
@@ -153,7 +153,7 @@ impl Database {
 		let category_chunks = mod_categories.chunks(chunk_size);
 		let category_chunks_count = category_chunks.len();
 		for (index, chunk) in category_chunks.enumerate() {
-			println!(
+			log::debug!(
 				"Inserting mod category junction chunk {}/{}",
 				index + 1,
 				category_chunks_count
