@@ -2,4 +2,7 @@
 /data/
 /build/
 
+/release/
+release.zip
+
 .vscode

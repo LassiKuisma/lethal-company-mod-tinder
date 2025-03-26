@@ -2,6 +2,9 @@
 /data/
 /build/
 
+/release/
+release.zip
+
 .gitignore
 .git/
 
