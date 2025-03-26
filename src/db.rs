@@ -684,20 +684,12 @@ mod tests {
 
 		let db = Database::open_in_memory();
 
-		let category_1 = Category {
-			name: "first category".to_string(),
-			id: 0,
-		};
-
-		let category_2 = Category {
-			name: "second category".to_string(),
-			id: 1,
-		};
-
-		let category_3 = Category {
-			name: "third category".to_string(),
-			id: 2,
-		};
+		db.connection
+			.execute(
+				"INSERT INTO categories(id, name) VALUES (0, 'first'), (1, 'second'), (2, 'third');",
+				[],
+			)
+			.unwrap();
 
 		let m1 = Mod {
 			name: "mod-1".to_string(),
@@ -732,11 +724,7 @@ mod tests {
 				rating: 12345,
 				is_deprecated: false,
 				has_nsfw_content: false,
-				category_ids: HashSet::from_iter(vec![
-					&category_1.id,
-					&category_2.id,
-					&category_3.id,
-				]),
+				category_ids: HashSet::from_iter(vec![&0, &1, &2]),
 			},
 			InsertMod {
 				uuid4: &m2.id,
