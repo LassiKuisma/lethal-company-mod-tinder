@@ -58,7 +58,7 @@ async fn main() -> std::io::Result<()> {
 			.service(rated_mods)
 			.default_service(web::to(default_handler))
 	})
-	.bind(("127.0.0.1", port))?
+	.bind(("0.0.0.0", port))?
 	.run()
 	.await
 }

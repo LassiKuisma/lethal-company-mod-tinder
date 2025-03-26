@@ -1,4 +1,4 @@
-use std::{collections::HashSet, error::Error};
+use std::{collections::HashSet, error::Error, fs::create_dir_all, path::PathBuf};
 
 use include_dir::{Dir, include_dir};
 use rusqlite::{Connection, OptionalExtension, ToSql, params_from_iter};
@@ -16,6 +16,10 @@ pub struct Database {
 impl Database {
 	pub fn open_connection() -> Result<Self, Box<dyn Error>> {
 		assert!(!cfg!(test), "Trying to open db connection in tests");
+
+		let db_path = PathBuf::from(DB_PATH);
+		let db_dir = db_path.parent().unwrap();
+		create_dir_all(db_dir).expect("Creating data directory failed.");
 
 		let mut connection = Connection::open(DB_PATH)?;
 		apply_migrations(&mut connection)?;
@@ -129,7 +133,7 @@ impl Database {
 	pub fn insert_mods(&self, mods: &Vec<InsertMod>) -> Result<(), Box<dyn Error>> {
 		self.clear_categories_junction_table()?;
 
-		let chunk_size = 10000;
+		let chunk_size = 150;
 		let mod_chunks = mods.chunks(chunk_size);
 		let mod_chunks_count = mod_chunks.len();
 
