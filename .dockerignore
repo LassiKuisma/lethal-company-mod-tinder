@@ -1,0 +1,8 @@
+/target/
+/data/
+/build/
+
+.gitignore
+.git/
+
+.vscode
