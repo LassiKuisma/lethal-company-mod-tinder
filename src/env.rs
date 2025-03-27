@@ -5,6 +5,7 @@ use log::LevelFilter;
 pub struct Env {
 	pub port: u16,
 	pub log_level: LevelFilter,
+	pub sql_chunk_size: usize,
 }
 
 impl Env {
@@ -19,12 +20,24 @@ impl Env {
 
 		let log_level = vars
 			.get("LOG_LEVEL")
-			.expect("Missing .env variable: LOG_LEVEL")
-			.clone();
+			.expect("Missing .env variable: LOG_LEVEL");
+
+		let sql_chunk_size_str = vars
+			.get("SQL_CHUNK_SIZE")
+			.expect("Missing .env variable: SQL_CHUNK_SIZE");
+
+		let sql_chunk_size = sql_chunk_size_str.parse().expect(&format!(
+			"Can't convert SQL_CHUNK_SIZE to number: '{sql_chunk_size_str}'"
+		));
+
+		if sql_chunk_size == 0 {
+			panic!("SQL_CHUNK_SIZE can't be zero");
+		}
 
 		Self {
 			port,
-			log_level: get_log_level(&log_level),
+			log_level: get_log_level(log_level),
+			sql_chunk_size,
 		}
 	}
 }

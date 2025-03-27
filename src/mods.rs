@@ -10,7 +10,10 @@ use curl::easy::Easy;
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 
-use crate::db::{Database, InsertMod};
+use crate::{
+	db::{Database, InsertMod},
+	env::Env,
+};
 
 type Mods = Vec<ModRaw>;
 
@@ -137,7 +140,11 @@ impl ModRaw {
 }
 
 #[allow(dead_code)]
-pub fn refresh_mods(db: &Database, options: ModRefreshOptions) -> Result<(), Box<dyn Error>> {
+pub fn refresh_mods(
+	db: &Database,
+	options: ModRefreshOptions,
+	env: &Env,
+) -> Result<(), Box<dyn Error>> {
 	let should_update_cache = match options {
 		ModRefreshOptions::ForceDownload => true,
 		ModRefreshOptions::CacheOnly => false,
@@ -158,7 +165,7 @@ pub fn refresh_mods(db: &Database, options: ModRefreshOptions) -> Result<(), Box
 
 	if should_update_db {
 		let mods = load_mods_from_cache()?;
-		save_mods_to_db(db, &mods)?;
+		save_mods_to_db(db, &mods, env)?;
 	}
 
 	Ok(())
@@ -259,7 +266,7 @@ impl Default for ModRefreshOptions {
 	}
 }
 
-fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>) -> Result<(), Box<dyn Error>> {
+fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>, env: &Env) -> Result<(), Box<dyn Error>> {
 	let category_names = mods
 		.iter()
 		.map(|modd| modd.categories.iter())
@@ -277,6 +284,6 @@ fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>) -> Result<(), Box<dyn Erro
 
 	let mods = mods.iter().map(|m| m.to_insertable(&categories)).collect();
 	log::info!("Savings mods to db");
-	db.insert_mods(&mods)?;
+	db.insert_mods(&mods, env.sql_chunk_size)?;
 	Ok(())
 }
