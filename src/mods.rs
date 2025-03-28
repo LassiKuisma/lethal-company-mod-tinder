@@ -140,14 +140,13 @@ impl ModRaw {
 }
 
 #[allow(dead_code)]
-pub fn refresh_mods(
-	db: &Database,
-	options: ModRefreshOptions,
-	env: &Env,
-) -> Result<(), Box<dyn Error>> {
+pub fn refresh_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
+	let options = env.mod_refresh_options.clone();
+
 	let should_update_cache = match options {
 		ModRefreshOptions::ForceDownload => true,
 		ModRefreshOptions::CacheOnly => false,
+		ModRefreshOptions::NoRefresh => false,
 		ModRefreshOptions::DownloadIfExpired(duration) => {
 			let last_update = db.latest_mod_update_date()?;
 			is_expired(last_update, UtcDateTime::now(), duration)
@@ -250,20 +249,12 @@ fn is_expired(
 }
 
 #[allow(dead_code)]
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub enum ModRefreshOptions {
 	ForceDownload,
 	CacheOnly,
+	NoRefresh,
 	DownloadIfExpired(Duration),
-}
-
-impl Default for ModRefreshOptions {
-	fn default() -> Self {
-		let days = 1;
-		let secs_in_day = 24 * 60 * 60;
-		let secs = days * secs_in_day;
-		Self::DownloadIfExpired(Duration::from_secs(secs))
-	}
 }
 
 fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>, env: &Env) -> Result<(), Box<dyn Error>> {

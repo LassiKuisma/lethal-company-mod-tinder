@@ -23,8 +23,7 @@ async fn main() -> std::io::Result<()> {
 	env_logger::builder().filter_level(env.log_level).init();
 
 	let db = Database::open_connection().unwrap();
-	refresh_mods(&db, mods::ModRefreshOptions::default(), &env).unwrap();
-	//refresh_mods(&db, mods::ModRefreshOptions::CacheOnly).unwrap();
+	refresh_mods(&db, &env).unwrap();
 
 	let data = Data::new(Mutex::new(db));
 
