@@ -16,38 +16,29 @@ impl Env {
 		dotenvy::dotenv().expect("Can't find .env file");
 		let vars = env::vars().collect::<HashMap<_, _>>();
 
-		let port_str = vars.get("PORT").expect("Missing .env variable: PORT");
-		let port = port_str
-			.parse()
-			.expect(&format!("Can't convert PORT to number: '{port_str}'"));
-
-		let log_level = vars
-			.get("LOG_LEVEL")
-			.expect("Missing .env variable: LOG_LEVEL");
-
-		let sql_chunk_size_str = vars
-			.get("SQL_CHUNK_SIZE")
-			.expect("Missing .env variable: SQL_CHUNK_SIZE");
-
-		let sql_chunk_size = sql_chunk_size_str.parse().expect(&format!(
-			"Can't convert SQL_CHUNK_SIZE to number: '{sql_chunk_size_str}'"
-		));
-
-		if sql_chunk_size == 0 {
-			panic!("SQL_CHUNK_SIZE can't be zero");
-		}
-
 		Self {
-			port,
-			log_level: get_log_level(log_level),
-			sql_chunk_size,
-			mod_refresh_options: get_mod_refresh_options(vars),
+			port: port(&vars),
+			log_level: log_level(&vars),
+			sql_chunk_size: chunk_size(&vars),
+			mod_refresh_options: mod_refresh_options(&vars),
 		}
 	}
 }
 
-fn get_log_level(str: &str) -> LevelFilter {
-	if let Some(log_level) = LevelFilter::from_str(str).ok() {
+fn port(vars: &HashMap<String, String>) -> u16 {
+	let port_str = vars.get("PORT").expect("Missing .env variable: PORT");
+
+	port_str
+		.parse()
+		.expect(&format!("Can't convert PORT to number: '{port_str}'"))
+}
+
+fn log_level(vars: &HashMap<String, String>) -> LevelFilter {
+	let log_level = vars
+		.get("LOG_LEVEL")
+		.expect("Missing .env variable: LOG_LEVEL");
+
+	if let Some(log_level) = LevelFilter::from_str(&log_level).ok() {
 		return log_level;
 	}
 
@@ -58,11 +49,27 @@ fn get_log_level(str: &str) -> LevelFilter {
 
 	panic!(
 		"Not a valid log level: '{}'. Allowed values are: {}",
-		str, allowed_values
+		log_level, allowed_values
 	);
 }
 
-fn get_mod_refresh_options(vars: HashMap<String, String>) -> ModRefreshOptions {
+fn chunk_size(vars: &HashMap<String, String>) -> usize {
+	let str = vars
+		.get("SQL_CHUNK_SIZE")
+		.expect("Missing .env variable: SQL_CHUNK_SIZE");
+
+	let sql_chunk_size = str
+		.parse()
+		.expect(&format!("Can't convert SQL_CHUNK_SIZE to number: '{str}'"));
+
+	if sql_chunk_size == 0 {
+		panic!("SQL_CHUNK_SIZE can't be zero");
+	}
+
+	sql_chunk_size
+}
+
+fn mod_refresh_options(vars: &HashMap<String, String>) -> ModRefreshOptions {
 	let str = vars
 		.get("MOD_REFRESH")
 		.expect("Missing .env variable: MOD_REFRESH")
