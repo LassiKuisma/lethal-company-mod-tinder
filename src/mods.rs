@@ -10,7 +10,10 @@ use curl::easy::Easy;
 use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 
-use crate::db::{Database, InsertMod};
+use crate::{
+	db::{Database, InsertMod},
+	env::Env,
+};
 
 type Mods = Vec<ModRaw>;
 
@@ -137,10 +140,13 @@ impl ModRaw {
 }
 
 #[allow(dead_code)]
-pub fn refresh_mods(db: &Database, options: ModRefreshOptions) -> Result<(), Box<dyn Error>> {
+pub fn refresh_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
+	let options = env.mod_refresh_options.clone();
+
 	let should_update_cache = match options {
 		ModRefreshOptions::ForceDownload => true,
 		ModRefreshOptions::CacheOnly => false,
+		ModRefreshOptions::NoRefresh => false,
 		ModRefreshOptions::DownloadIfExpired(duration) => {
 			let last_update = db.latest_mod_update_date()?;
 			is_expired(last_update, UtcDateTime::now(), duration)
@@ -158,7 +164,7 @@ pub fn refresh_mods(db: &Database, options: ModRefreshOptions) -> Result<(), Box
 
 	if should_update_db {
 		let mods = load_mods_from_cache()?;
-		save_mods_to_db(db, &mods)?;
+		save_mods_to_db(db, &mods, env)?;
 	}
 
 	Ok(())
@@ -243,23 +249,15 @@ fn is_expired(
 }
 
 #[allow(dead_code)]
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub enum ModRefreshOptions {
 	ForceDownload,
 	CacheOnly,
+	NoRefresh,
 	DownloadIfExpired(Duration),
 }
 
-impl Default for ModRefreshOptions {
-	fn default() -> Self {
-		let days = 1;
-		let secs_in_day = 24 * 60 * 60;
-		let secs = days * secs_in_day;
-		Self::DownloadIfExpired(Duration::from_secs(secs))
-	}
-}
-
-fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>) -> Result<(), Box<dyn Error>> {
+fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>, env: &Env) -> Result<(), Box<dyn Error>> {
 	let category_names = mods
 		.iter()
 		.map(|modd| modd.categories.iter())
@@ -277,6 +275,6 @@ fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>) -> Result<(), Box<dyn Erro
 
 	let mods = mods.iter().map(|m| m.to_insertable(&categories)).collect();
 	log::info!("Savings mods to db");
-	db.insert_mods(&mods)?;
+	db.insert_mods(&mods, env.sql_chunk_size)?;
 	Ok(())
 }

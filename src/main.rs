@@ -8,20 +8,22 @@ use actix_web::{
 	web::{self, Data, Form, Html},
 };
 use db::{Database, ModQueryOptions};
+use env::Env;
 use mods::{Rating, refresh_mods};
 use serde::Deserialize;
 use tera::{Context, Tera};
 
 mod db;
+mod env;
 mod mods;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-	env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+	let env = Env::load();
+	env_logger::builder().filter_level(env.log_level).init();
 
 	let db = Database::open_connection().unwrap();
-	refresh_mods(&db, mods::ModRefreshOptions::default()).unwrap();
-	//refresh_mods(&db, mods::ModRefreshOptions::CacheOnly).unwrap();
+	refresh_mods(&db, &env).unwrap();
 
 	let data = Data::new(Mutex::new(db));
 
@@ -43,7 +45,7 @@ async fn main() -> std::io::Result<()> {
 		)
 	};
 
-	let port = 3000;
+	let port = env.port;
 	log::info!("Starting server on port {port}");
 
 	HttpServer::new(move || {
