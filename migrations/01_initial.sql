@@ -1,5 +1,5 @@
 CREATE TABLE categories (
-  id    INTEGER PRIMARY KEY AUTOINCREMENT,
+  id    SERIAL PRIMARY KEY NOT NULL,
   name  TEXT UNIQUE NOT NULL
 );
 
@@ -18,8 +18,8 @@ CREATE TABLE mods (
 );
 
 CREATE TABLE mod_category (
-  mod_id       UUID,
-  category_id  INTEGER,
+  mod_id       UUID NOT NULL,
+  category_id  INTEGER NOT NULL,
 
   PRIMARY KEY(mod_id, category_id),
   FOREIGN KEY(mod_id)      REFERENCES mods(id),

@@ -8,7 +8,9 @@ use std::{
 
 use curl::easy::Easy;
 use serde::{Deserialize, Serialize};
-use time::UtcDateTime;
+use sqlx::prelude::FromRow;
+use time::{Date, UtcDateTime, format_description::well_known::Iso8601};
+use uuid::Uuid;
 
 use crate::{
 	db::{Database, InsertMod},
@@ -21,23 +23,24 @@ const CACHE_FILE: &str = "data/mods_cache.json";
 const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
 
 #[allow(dead_code)]
-#[derive(Debug, Hash, PartialEq, Eq, Serialize)]
+#[derive(Debug, Hash, PartialEq, Serialize, Eq, FromRow)]
 pub struct Mod {
 	pub name: String,
 	pub owner: String,
 	pub description: String,
-	pub icon: String,
+	pub icon_url: String,
 	pub package_url: String,
-	pub id: String,
+	pub id: Uuid,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, FromRow)]
 pub struct Category {
 	pub name: String,
-	pub id: i64,
+	pub id: i32,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, sqlx::Type)]
+#[sqlx(type_name = "rating_type")]
 pub enum Rating {
 	Like,
 	Dislike,
@@ -122,15 +125,18 @@ impl ModRaw {
 			.map(|ct| &ct.id)
 			.collect::<HashSet<_>>();
 
+		let uuid = Uuid::try_parse(&self.uuid4).unwrap();
+		let date = Date::parse(&self.date_updated, &Iso8601::DEFAULT).unwrap();
+
 		InsertMod {
-			uuid4: &self.uuid4,
+			uuid4: uuid,
 			name: &self.name,
 			description,
 			icon_url,
 			full_name: &self.full_name,
 			owner: &self.owner,
 			package_url: &self.package_url,
-			updated_date: &self.date_updated,
+			updated_date: date,
 			rating: self.rating_score,
 			is_deprecated: self.is_deprecated,
 			has_nsfw_content: self.has_nsfw_content,
@@ -140,7 +146,7 @@ impl ModRaw {
 }
 
 #[allow(dead_code)]
-pub fn refresh_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
+pub async fn refresh_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
 	let options = env.mod_refresh_options.clone();
 
 	let should_update_cache = match options {
@@ -148,15 +154,16 @@ pub fn refresh_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
 		ModRefreshOptions::CacheOnly => false,
 		ModRefreshOptions::NoRefresh => false,
 		ModRefreshOptions::DownloadIfExpired(duration) => {
-			let last_update = db.latest_mod_update_date()?;
-			is_expired(last_update, UtcDateTime::now(), duration)
+			let last_update = db.latest_mod_update_date().await?;
+			let now = UtcDateTime::now().date();
+			is_expired(last_update, now, duration)
 		}
 	};
 
 	if should_update_cache {
 		let mods_json = load_mods_json()?;
 		save_mods_to_cache(&mods_json)?;
-		db.set_mods_updated_date(UtcDateTime::now())?;
+		db.set_mods_updated_date(UtcDateTime::now().date()).await?;
 	}
 
 	// do "cache -> db" if we updated cache, or if user requested a cache-only treatment
@@ -164,7 +171,7 @@ pub fn refresh_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
 
 	if should_update_db {
 		let mods = load_mods_from_cache()?;
-		save_mods_to_db(db, &mods, env)?;
+		save_mods_to_db(db, &mods, env).await?;
 	}
 
 	Ok(())
@@ -234,11 +241,7 @@ fn load_mods_from_cache() -> Result<Mods, Box<dyn Error>> {
 	Ok(mods)
 }
 
-fn is_expired(
-	last_update: Option<UtcDateTime>,
-	now: UtcDateTime,
-	expiration_duration: Duration,
-) -> bool {
+fn is_expired(last_update: Option<Date>, now: Date, expiration_duration: Duration) -> bool {
 	if let Some(last_update) = last_update {
 		let time_passed = now - last_update;
 		time_passed > expiration_duration
@@ -257,7 +260,11 @@ pub enum ModRefreshOptions {
 	DownloadIfExpired(Duration),
 }
 
-fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>, env: &Env) -> Result<(), Box<dyn Error>> {
+async fn save_mods_to_db(
+	db: &Database,
+	mods: &Vec<ModRaw>,
+	env: &Env,
+) -> Result<(), Box<dyn Error>> {
 	let category_names = mods
 		.iter()
 		.map(|modd| modd.categories.iter())
@@ -265,16 +272,17 @@ fn save_mods_to_db(db: &Database, mods: &Vec<ModRaw>, env: &Env) -> Result<(), B
 		.collect::<HashSet<_>>();
 
 	log::info!("Saving mod categories to db");
-	db.insert_categories(&category_names)?;
+	db.insert_categories(&category_names).await?;
 
 	let categories = db
-		.get_categories()?
+		.get_categories()
+		.await?
 		.into_iter()
 		.map(|ct| (ct.name.clone(), ct))
 		.collect::<HashMap<String, Category>>();
 
 	let mods = mods.iter().map(|m| m.to_insertable(&categories)).collect();
 	log::info!("Savings mods to db");
-	db.insert_mods(&mods, env.sql_chunk_size)?;
+	db.insert_mods(&mods, env.sql_chunk_size).await?;
 	Ok(())
 }
