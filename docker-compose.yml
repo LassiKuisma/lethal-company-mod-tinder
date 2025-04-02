@@ -1,0 +1,21 @@
+services:
+  dev-db:
+    image: postgres
+    volumes:
+      - lethal-mods-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: lcmt
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+    ports:
+      - 5432:5432
+  test-db:
+    image: postgres
+    environment:
+      POSTGRES_DB: test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+    ports:
+      - 5431:5432
+volumes:
+  lethal-mods-data:
