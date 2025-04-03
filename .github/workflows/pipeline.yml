@@ -18,6 +18,8 @@ jobs:
       - name: Start DB
         run: docker compose up -d test-db
       - run: cargo test
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5431/test
   build:
     name: build
     needs: test

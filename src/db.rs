@@ -319,46 +319,9 @@ impl Default for ModQueryOptions {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::env::Env;
-	use serial_test::serial;
 	use time::format_description::well_known::Iso8601;
 
 	impl Database {
-		async fn connect_to_test_db() -> Self {
-			let db_url = Env::get_test_db_url();
-			let db = Self::open_connection(&db_url, 1).await.unwrap();
-			db.clear_db().await;
-
-			db
-		}
-
-		async fn clear_db(&self) {
-			sqlx::query("DELETE FROM ratings;")
-				.execute(&self.pool)
-				.await
-				.unwrap();
-
-			sqlx::query("DELETE FROM mod_category;")
-				.execute(&self.pool)
-				.await
-				.unwrap();
-
-			sqlx::query("DELETE FROM mods;")
-				.execute(&self.pool)
-				.await
-				.unwrap();
-
-			sqlx::query("DELETE FROM categories;")
-				.execute(&self.pool)
-				.await
-				.unwrap();
-
-			sqlx::query("DELETE FROM mods_imported_date;")
-				.execute(&self.pool)
-				.await
-				.unwrap();
-		}
-
 		async fn insert_test_data(&self) {
 			let insert_categories = r#"
 			INSERT INTO categories(id, name) VALUES
@@ -424,10 +387,9 @@ mod tests {
 		mods.into_iter().map(|m| m.name).collect()
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn querying_mods_without_ignored_categories() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn querying_mods_without_ignored_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		let result = db
@@ -457,10 +419,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn querying_mods_ignored_categories() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn querying_mods_ignored_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		let result = db
@@ -479,10 +440,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn querying_mods_allowing_deprecated() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn querying_mods_allowing_deprecated(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		let result = db
@@ -509,10 +469,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn querying_non_deprecated_mods() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn querying_non_deprecated_mods(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		let result = db
@@ -538,10 +497,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn querying_non_deprecated_mods_ignoring_categories() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn querying_non_deprecated_mods_ignoring_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		let result = db
@@ -560,10 +518,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn querying_non_deprecated_nswf_mods_ignoring_categories() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn querying_non_deprecated_nswf_mods_ignoring_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		let result = db
@@ -588,10 +545,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn querying_mods_most_recently_updated_is_first() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn querying_mods_most_recently_updated_is_first(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		let result = db
@@ -610,19 +566,17 @@ mod tests {
 		assert_eq!(expected, mods);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn get_mod_import_date_from_empty_database() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn get_mod_import_date_from_empty_database(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
 		let date = db.latest_mod_import_date().await.unwrap();
 		assert_eq!(None, date);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn set_and_get_mod_import_date() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn set_and_get_mod_import_date(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
 		let timestamp = Date::parse("2025-03-22T12:45:56.001122Z", &Iso8601::DEFAULT).unwrap();
 		db.set_mods_imported_date(timestamp).await.unwrap();
@@ -631,10 +585,9 @@ mod tests {
 		assert_eq!(timestamp, date);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn set_mod_import_date_multiple_times() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn set_mod_import_date_multiple_times(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
 		let old = Date::parse("2000-01-01T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
 		let mid = Date::parse("2002-02-22T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
@@ -648,10 +601,9 @@ mod tests {
 		assert_eq!(new, date);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn insert_and_query_categories() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn insert_and_query_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		let categories = hashset_of(vec!["Foo", "Bar", "Baz", "Cat", "Dog"]);
 		db.insert_categories(&categories).await.unwrap();
 
@@ -667,12 +619,11 @@ mod tests {
 		assert_eq!(expected, result);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn inserting_and_querying_mods() {
+	#[sqlx::test]
+	async fn inserting_and_querying_mods(pool: Pool<Postgres>) {
 		let null = "".to_string();
 
-		let db = Database::connect_to_test_db().await;
+		let db = Database { pool };
 		db.insert_categories(&hashset_of(vec!["first", "second", "third"]))
 			.await
 			.unwrap();
@@ -752,10 +703,9 @@ mod tests {
 		assert_eq!(expected, result);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn rated_mods_are_omitted_from_queries() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn rated_mods_are_omitted_from_queries(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		db.insert_mod_rating(
@@ -796,10 +746,9 @@ mod tests {
 		assert_eq!(expected, mods);
 	}
 
-	#[actix_rt::test]
-	#[serial]
-	async fn querying_rated_mods() {
-		let db = Database::connect_to_test_db().await;
+	#[sqlx::test]
+	async fn querying_rated_mods(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		db.insert_test_data().await;
 
 		db.insert_mod_rating(

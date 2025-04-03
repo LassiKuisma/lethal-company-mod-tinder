@@ -27,19 +27,6 @@ impl Env {
 	}
 }
 
-#[cfg(test)]
-impl Env {
-	pub fn get_test_db_url() -> String {
-		// test db url might be given as an environment variable when running tests (for example in CI pipeline)
-		// -> ignore file-not-found if .env doesn't exist
-		let _ = dotenvy::dotenv();
-
-		env::vars()
-			.find_map(|(key, value)| key.eq("TEST_DB_URL").then_some(value))
-			.expect("Missing .env variable: TEST_DB_URL")
-	}
-}
-
 fn port(vars: &HashMap<String, String>) -> u16 {
 	let port_str = vars.get("PORT").expect("Missing .env variable: PORT");
 
