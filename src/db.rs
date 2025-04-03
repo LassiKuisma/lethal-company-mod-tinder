@@ -321,64 +321,6 @@ mod tests {
 	use super::*;
 	use time::format_description::well_known::Iso8601;
 
-	impl Database {
-		async fn insert_test_data(&self) {
-			let insert_categories = r#"
-			INSERT INTO categories(id, name) VALUES
-			(0, 'Suits'),
-			(1, 'Music'),
-			(2, 'TV'),
-			(3, 'Items'),
-			(4, 'Misc');
-			"#;
-
-			let insert_mods = r#"
-			INSERT INTO mods
-			(id,                                      name,          updated_date,                  deprecated, nsfw,  description, icon_url, full_name, owner, package_url, rating) VALUES
-			('00000000-0000-0000-0000-000000000001',  '1st',         '2025-03-20T10:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000002',  'dep-mod',     '2025-03-20T09:00:00.000000Z', true,       false, '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000003',  'nsfw-mod',    '2025-03-20T08:00:00.000000Z', false,      true,  '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000004',  'dep-nsfw',    '2025-03-20T07:00:00.000000Z', true,       true,  '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000005',  '5th',         '2025-03-09T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000006',  '6th',         '2025-03-08T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000007',  'nsfw-2',      '2025-03-07T00:00:00.000000Z', false,      true,  '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000008',  'no-category', '2025-03-06T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000009',  'new-update',  '2025-03-21T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('00000000-0000-0000-0000-000000000010', 'old-mod',     '2020-01-01T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0);
-			"#;
-
-			let insert_mod_category = r#"
-			INSERT INTO mod_category(category_id, mod_id) VALUES
-			(1, '00000000-0000-0000-0000-000000000005'),
-			(1, '00000000-0000-0000-0000-000000000006'),
-
-			(2, '00000000-0000-0000-0000-000000000005'),
-
-			(3, '00000000-0000-0000-0000-000000000001'),
-			(3, '00000000-0000-0000-0000-000000000002'),
-			(3, '00000000-0000-0000-0000-000000000003'),
-			(3, '00000000-0000-0000-0000-000000000004'),
-			(3, '00000000-0000-0000-0000-000000000005'),
-
-			(4, '00000000-0000-0000-0000-000000000001'),
-			(4, '00000000-0000-0000-0000-000000000005'),
-			(4, '00000000-0000-0000-0000-000000000007');
-			"#;
-
-			sqlx::query(insert_categories)
-				.execute(&self.pool)
-				.await
-				.unwrap();
-
-			sqlx::query(insert_mods).execute(&self.pool).await.unwrap();
-
-			sqlx::query(insert_mod_category)
-				.execute(&self.pool)
-				.await
-				.unwrap();
-		}
-	}
-
 	fn hashset_of(items: Vec<&str>) -> HashSet<String> {
 		items.into_iter().map(|s| s.to_string()).collect()
 	}
@@ -387,10 +329,9 @@ mod tests {
 		mods.into_iter().map(|m| m.name).collect()
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn querying_mods_without_ignored_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		let result = db
 			.get_mods(&ModQueryOptions {
@@ -419,10 +360,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn querying_mods_ignored_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		let result = db
 			.get_mods(&ModQueryOptions {
@@ -440,10 +380,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn querying_mods_allowing_deprecated(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		let result = db
 			.get_mods(&ModQueryOptions {
@@ -469,10 +408,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn querying_non_deprecated_mods(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		let result = db
 			.get_mods(&ModQueryOptions {
@@ -497,10 +435,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn querying_non_deprecated_mods_ignoring_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		let result = db
 			.get_mods(&ModQueryOptions {
@@ -518,10 +455,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn querying_non_deprecated_nswf_mods_ignoring_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		let result = db
 			.get_mods(&ModQueryOptions {
@@ -545,10 +481,9 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn querying_mods_most_recently_updated_is_first(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		let result = db
 			.get_mods(&ModQueryOptions {
@@ -703,10 +638,9 @@ mod tests {
 		assert_eq!(expected, result);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn rated_mods_are_omitted_from_queries(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		db.insert_mod_rating(
 			&Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
@@ -746,10 +680,9 @@ mod tests {
 		assert_eq!(expected, mods);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("mods"))]
 	async fn querying_rated_mods(pool: Pool<Postgres>) {
 		let db = Database { pool };
-		db.insert_test_data().await;
 
 		db.insert_mod_rating(
 			&Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
