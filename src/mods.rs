@@ -154,16 +154,16 @@ pub async fn refresh_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>
 		ModRefreshOptions::CacheOnly => false,
 		ModRefreshOptions::NoRefresh => false,
 		ModRefreshOptions::DownloadIfExpired(duration) => {
-			let last_update = db.latest_mod_update_date().await?;
+			let last_import = db.latest_mod_import_date().await?;
 			let now = UtcDateTime::now().date();
-			is_expired(last_update, now, duration)
+			is_expired(last_import, now, duration)
 		}
 	};
 
 	if should_update_cache {
 		let mods_json = load_mods_json()?;
 		save_mods_to_cache(&mods_json)?;
-		db.set_mods_updated_date(UtcDateTime::now().date()).await?;
+		db.set_mods_imported_date(UtcDateTime::now().date()).await?;
 	}
 
 	// do "cache -> db" if we updated cache, or if user requested a cache-only treatment
@@ -241,9 +241,9 @@ fn load_mods_from_cache() -> Result<Mods, Box<dyn Error>> {
 	Ok(mods)
 }
 
-fn is_expired(last_update: Option<Date>, now: Date, expiration_duration: Duration) -> bool {
-	if let Some(last_update) = last_update {
-		let time_passed = now - last_update;
+fn is_expired(last_import: Option<Date>, now: Date, expiration_duration: Duration) -> bool {
+	if let Some(last_import) = last_import {
+		let time_passed = now - last_import;
 		time_passed > expiration_duration
 	} else {
 		// no previous value present -> this is first time

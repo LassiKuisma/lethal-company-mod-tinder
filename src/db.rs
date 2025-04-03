@@ -221,11 +221,10 @@ nsfw        =EXCLUDED.nsfw",
 		Ok(())
 	}
 
-	pub async fn latest_mod_update_date(&self) -> Result<Option<Date>, Box<dyn Error>> {
-		let result =
-			sqlx::query("SELECT date FROM mods_updated_date WHERE mods_updated_date.id = 0;")
-				.fetch_optional(&self.pool)
-				.await?;
+	pub async fn latest_mod_import_date(&self) -> Result<Option<Date>, Box<dyn Error>> {
+		let result = sqlx::query("SELECT date FROM mods_imported_date WHERE id = 0;")
+			.fetch_optional(&self.pool)
+			.await?;
 
 		if let Some(row) = result {
 			let date = row.try_get::<Date, _>("date")?;
@@ -236,8 +235,8 @@ nsfw        =EXCLUDED.nsfw",
 		}
 	}
 
-	pub async fn set_mods_updated_date(&self, date: Date) -> Result<(), Box<dyn Error>> {
-		sqlx::query("INSERT INTO mods_updated_date (id, date) VALUES (0, $1) ON CONFLICT(id) DO UPDATE SET date = EXCLUDED.date;")
+	pub async fn set_mods_imported_date(&self, date: Date) -> Result<(), Box<dyn Error>> {
+		sqlx::query("INSERT INTO mods_imported_date (id, date) VALUES (0, $1) ON CONFLICT(id) DO UPDATE SET date = EXCLUDED.date;")
 			.bind(date)
 			.execute(&self.pool)
 			.await?;
@@ -354,7 +353,7 @@ mod tests {
 				.await
 				.unwrap();
 
-			sqlx::query("DELETE FROM mods_updated_date;")
+			sqlx::query("DELETE FROM mods_imported_date;")
 				.execute(&self.pool)
 				.await
 				.unwrap();
@@ -613,40 +612,40 @@ mod tests {
 
 	#[actix_rt::test]
 	#[serial]
-	async fn get_mod_update_date_from_empty_database() {
+	async fn get_mod_import_date_from_empty_database() {
 		let db = Database::connect_to_test_db().await;
 
-		let last_update = db.latest_mod_update_date().await.unwrap();
-		assert_eq!(None, last_update);
+		let date = db.latest_mod_import_date().await.unwrap();
+		assert_eq!(None, date);
 	}
 
 	#[actix_rt::test]
 	#[serial]
-	async fn set_and_get_mod_update_date() {
+	async fn set_and_get_mod_import_date() {
 		let db = Database::connect_to_test_db().await;
 
 		let timestamp = Date::parse("2025-03-22T12:45:56.001122Z", &Iso8601::DEFAULT).unwrap();
-		db.set_mods_updated_date(timestamp).await.unwrap();
+		db.set_mods_imported_date(timestamp).await.unwrap();
 
-		let latest_update = db.latest_mod_update_date().await.unwrap().unwrap();
-		assert_eq!(timestamp, latest_update);
+		let date = db.latest_mod_import_date().await.unwrap().unwrap();
+		assert_eq!(timestamp, date);
 	}
 
 	#[actix_rt::test]
 	#[serial]
-	async fn set_mod_update_date_multiple_times() {
+	async fn set_mod_import_date_multiple_times() {
 		let db = Database::connect_to_test_db().await;
 
 		let old = Date::parse("2000-01-01T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
 		let mid = Date::parse("2002-02-22T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
 		let new = Date::parse("2025-03-03T03:03:03.000000Z", &Iso8601::DEFAULT).unwrap();
 
-		db.set_mods_updated_date(old).await.unwrap();
-		db.set_mods_updated_date(mid).await.unwrap();
-		db.set_mods_updated_date(new).await.unwrap();
+		db.set_mods_imported_date(old).await.unwrap();
+		db.set_mods_imported_date(mid).await.unwrap();
+		db.set_mods_imported_date(new).await.unwrap();
 
-		let latest_update = db.latest_mod_update_date().await.unwrap().unwrap();
-		assert_eq!(new, latest_update);
+		let date = db.latest_mod_import_date().await.unwrap().unwrap();
+		assert_eq!(new, date);
 	}
 
 	#[actix_rt::test]
