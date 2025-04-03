@@ -333,15 +333,14 @@ mod tests {
 	async fn querying_mods_without_ignored_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: true,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: true,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -364,15 +363,14 @@ mod tests {
 	async fn querying_mods_ignored_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: hashset_of(vec!["Items", "Misc"]),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: true,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: hashset_of(vec!["Items", "Misc"]),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: true,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec!["6th", "no-category", "new-update", "old-mod"]);
 
@@ -384,15 +382,14 @@ mod tests {
 	async fn querying_mods_allowing_deprecated(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: false,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: false,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -412,15 +409,14 @@ mod tests {
 	async fn querying_non_deprecated_mods(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: false,
-				include_nsfw: false,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: false,
+			include_nsfw: false,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -439,15 +435,14 @@ mod tests {
 	async fn querying_non_deprecated_mods_ignoring_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: hashset_of(vec!["Music", "Suits"]),
-				limit: 100,
-				include_deprecated: false,
-				include_nsfw: false,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: hashset_of(vec!["Music", "Suits"]),
+			limit: 100,
+			include_deprecated: false,
+			include_nsfw: false,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec!["1st", "no-category", "new-update", "old-mod"]);
 
@@ -459,15 +454,14 @@ mod tests {
 	async fn querying_non_deprecated_nswf_mods_ignoring_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: hashset_of(vec!["TV", "Suits", "Misc"]),
-				limit: 100,
-				include_deprecated: false,
-				include_nsfw: true,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: hashset_of(vec!["TV", "Suits", "Misc"]),
+			limit: 100,
+			include_deprecated: false,
+			include_nsfw: true,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"nsfw-mod",
@@ -485,15 +479,14 @@ mod tests {
 	async fn querying_mods_most_recently_updated_is_first(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 4,
-				include_deprecated: false,
-				include_nsfw: false,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 4,
+			include_deprecated: false,
+			include_nsfw: false,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = vec!["new-update", "1st", "5th", "6th"];
 
@@ -621,15 +614,14 @@ mod tests {
 
 		db.insert_mods(&mods, 150).await.unwrap();
 
-		let mut result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: true,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: true,
+		};
+
+		let mut result = db.get_mods(&query_options).await.unwrap();
 		result.sort_by(|a, b| a.name.cmp(&b.name));
 
 		let mut expected = vec![m1, m2];
@@ -655,15 +647,14 @@ mod tests {
 		.await
 		.unwrap();
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: true,
-			})
-			.await
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: true,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let mods = mod_names(result);
 		let expected = hashset_of(vec![
