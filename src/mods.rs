@@ -90,7 +90,10 @@ struct ModVersion {
 }
 
 impl ModRaw {
-	fn to_insertable<'a>(&'a self, categories: &'a HashMap<String, Category>) -> InsertMod<'a> {
+	fn to_insertable<'a>(
+		&'a self,
+		categories: &'a HashMap<String, Category>,
+	) -> Result<InsertMod<'a>, Box<dyn Error>> {
 		// assume that the first version in list in the most recent
 		let most_recent = self.versions.first();
 
@@ -125,10 +128,10 @@ impl ModRaw {
 			.map(|ct| &ct.id)
 			.collect::<HashSet<_>>();
 
-		let uuid = Uuid::try_parse(&self.uuid4).unwrap();
-		let date = Date::parse(&self.date_updated, &Iso8601::DEFAULT).unwrap();
+		let uuid = Uuid::try_parse(&self.uuid4)?;
+		let date = Date::parse(&self.date_updated, &Iso8601::DEFAULT)?;
 
-		InsertMod {
+		Ok(InsertMod {
 			uuid4: uuid,
 			name: &self.name,
 			description,
@@ -141,7 +144,7 @@ impl ModRaw {
 			is_deprecated: self.is_deprecated,
 			has_nsfw_content: self.has_nsfw_content,
 			category_ids,
-		}
+		})
 	}
 }
 
@@ -281,7 +284,21 @@ async fn save_mods_to_db(
 		.map(|ct| (ct.name.clone(), ct))
 		.collect::<HashMap<String, Category>>();
 
-	let mods = mods.iter().map(|m| m.to_insertable(&categories)).collect();
+	let mods = mods
+		.iter()
+		.filter_map(|m| {
+			m.to_insertable(&categories)
+				.inspect_err(|err| {
+					log::warn!(
+						"Failed to convert mod '{}' (id={}) to SQL-insertable: {}",
+						m.name,
+						m.uuid4,
+						err
+					)
+				})
+				.ok()
+		})
+		.collect();
 	log::info!("Savings mods to db");
 	db.insert_mods(&mods, env.sql_chunk_size).await?;
 	Ok(())
