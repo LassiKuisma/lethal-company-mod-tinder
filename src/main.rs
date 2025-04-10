@@ -12,6 +12,7 @@ use env::Env;
 use mods::{Rating, refresh_mods};
 use serde::Deserialize;
 use tera::{Context, Tera};
+use uuid::Uuid;
 
 mod db;
 mod env;
@@ -22,10 +23,8 @@ async fn main() -> std::io::Result<()> {
 	let env = Env::load();
 	env_logger::builder().filter_level(env.log_level).init();
 
-	let db = Database::open_connection().unwrap();
-	refresh_mods(&db, &env).unwrap();
-
-	let data = Data::new(Mutex::new(db));
+	let db = Database::open_connection(&env.db_url, 5).await.unwrap();
+	refresh_mods(&db, &env).await.unwrap();
 
 	let tera = Data::new(Mutex::new(Tera::new("templates/*.html").unwrap()));
 
@@ -51,7 +50,7 @@ async fn main() -> std::io::Result<()> {
 	HttpServer::new(move || {
 		App::new()
 			.wrap(middleware::Logger::default())
-			.app_data(data.clone())
+			.app_data(Data::new(db.clone()))
 			.app_data(tera.clone())
 			.service(favicon)
 			.service(welcome_page)
@@ -80,33 +79,32 @@ async fn welcome_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Er
 #[get("/rate")]
 async fn get_rating_page(
 	template: Data<Mutex<Tera>>,
-	db: Data<Mutex<Database>>,
+	db: Data<Database>,
 ) -> Result<Html, actix_web::Error> {
-	rating_page(template, db)
+	rating_page(template, db).await
 }
 
 #[post("/rate")]
 async fn post_rating(
 	params: Form<RatingForm>,
 	template: Data<Mutex<Tera>>,
-	db: Data<Mutex<Database>>,
+	db: Data<Database>,
 ) -> Result<Html, actix_web::Error> {
-	db.lock()
-		.unwrap()
-		.insert_mod_rating(&params.mod_id, &params.rating)?;
+	let uuid = Uuid::parse_str(&params.mod_id)
+		.map_err(|_| actix_web::error::ErrorBadRequest("Bad mod uuid"))?;
+	db.insert_mod_rating(&uuid, &params.rating).await?;
 
-	rating_page(template, db)
+	rating_page(template, db).await
 }
 
 #[get("/likes")]
 async fn rated_mods(
 	template: Data<Mutex<Tera>>,
-	db: Data<Mutex<Database>>,
+	db: Data<Database>,
 ) -> Result<Html, actix_web::Error> {
 	let mods = db
-		.lock()
-		.unwrap()
 		.get_rated_mods(&Rating::Like, 100)
+		.await
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
 	let mut ctx = Context::new();
@@ -138,9 +136,9 @@ async fn default_handler(req_method: Method) -> actix_web::Result<impl Responder
 	}
 }
 
-fn rating_page(
+async fn rating_page(
 	template: Data<Mutex<Tera>>,
-	db: Data<Mutex<Database>>,
+	db: Data<Database>,
 ) -> Result<Html, actix_web::Error> {
 	let mut ctx = Context::new();
 
@@ -152,9 +150,8 @@ fn rating_page(
 	};
 
 	let mods = db
-		.lock()
-		.unwrap()
 		.get_mods(&options)
+		.await
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
 	let modd = mods
@@ -163,10 +160,10 @@ fn rating_page(
 
 	ctx.insert("name", &modd.name);
 	ctx.insert("owner", &modd.owner);
-	ctx.insert("icon_url", &modd.icon);
+	ctx.insert("icon_url", &modd.icon_url);
 	ctx.insert("description", &modd.description);
 	ctx.insert("package_url", &modd.package_url);
-	ctx.insert("mod_id", &modd.id);
+	ctx.insert("mod_id", &modd.id.to_string());
 
 	let html = template
 		.lock()

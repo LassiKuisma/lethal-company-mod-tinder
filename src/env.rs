@@ -9,6 +9,7 @@ pub struct Env {
 	pub log_level: LevelFilter,
 	pub sql_chunk_size: usize,
 	pub mod_refresh_options: ModRefreshOptions,
+	pub db_url: String,
 }
 
 impl Env {
@@ -21,6 +22,7 @@ impl Env {
 			log_level: log_level(&vars),
 			sql_chunk_size: chunk_size(&vars),
 			mod_refresh_options: mod_refresh_options(&vars),
+			db_url: db_url(&vars),
 		}
 	}
 }
@@ -93,4 +95,10 @@ fn mod_refresh_options(vars: &HashMap<String, String>) -> ModRefreshOptions {
 			"Not a valid mod refresh option: '{str}'. Allowed values are: always-download, download-if-expired, cache-only, none"
 		),
 	}
+}
+
+fn db_url(vars: &HashMap<String, String>) -> String {
+	vars.get("DB_URL")
+		.expect("Missing .env variable: DB_URL")
+		.clone()
 }

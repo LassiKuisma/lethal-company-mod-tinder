@@ -1,100 +1,85 @@
-use std::{collections::HashSet, error::Error, fs::create_dir_all, path::PathBuf};
+use std::{collections::HashSet, error::Error};
 
-use include_dir::{Dir, include_dir};
-use rusqlite::{Connection, OptionalExtension, ToSql, params_from_iter};
-use rusqlite_migration::Migrations;
-use time::{UtcDateTime, format_description::well_known::Iso8601};
+use sqlx::{FromRow, Pool, Postgres, QueryBuilder, Row, postgres::PgPoolOptions};
+use time::Date;
+use uuid::Uuid;
 
 use crate::mods::{Category, Mod, Rating};
 
-const DB_PATH: &str = "data/db.db";
-
+#[derive(Clone)]
 pub struct Database {
-	connection: Connection,
+	pool: Pool<Postgres>,
 }
 
 impl Database {
-	pub fn open_connection() -> Result<Self, Box<dyn Error>> {
-		assert!(!cfg!(test), "Trying to open db connection in tests");
+	pub async fn open_connection(
+		db_url: &str,
+		max_connection: u32,
+	) -> Result<Self, Box<dyn Error>> {
+		let pool = PgPoolOptions::new()
+			.max_connections(max_connection)
+			.connect(db_url)
+			.await?;
 
-		let db_path = PathBuf::from(DB_PATH);
-		let db_dir = db_path.parent().unwrap();
-		create_dir_all(db_dir).expect("Creating data directory failed.");
+		let db = Database { pool };
+		db.apply_migrations().await?;
 
-		let mut connection = Connection::open(DB_PATH)?;
-		apply_migrations(&mut connection)?;
-
-		Ok(Database { connection })
+		Ok(db)
 	}
 
-	pub fn get_mods(&self, options: &ModQueryOptions) -> Result<Vec<Mod>, Box<dyn Error>> {
-		let ignored_categories = &options.ignored_categories;
+	async fn apply_migrations(&self) -> Result<(), Box<dyn Error>> {
+		let migrator = sqlx::migrate!("./migrations");
+		migrator.run(&self.pool).await?;
 
-		let mut filters = Vec::<String>::new();
+		Ok(())
+	}
 
-		if ignored_categories.len() != 0 {
-			let category_filter = format!(
-				"mods.id NOT IN
-					(SELECT mod_category.mod_id FROM mod_category
-					JOIN categories ON categories.id = mod_category.category_id
-					WHERE categories.name IN {})",
-				repeat_vars(1, ignored_categories.len())
-			);
-
-			filters.push(category_filter);
-		}
+	pub async fn get_mods(&self, options: &ModQueryOptions) -> Result<Vec<Mod>, Box<dyn Error>> {
+		let mut builder = QueryBuilder::new(
+			"SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id FROM mods ",
+		);
+		builder.push("WHERE mods.id NOT IN (SELECT mod_id FROM ratings) ");
 
 		if !options.include_deprecated {
-			filters.push("mods.deprecated = false".to_string());
+			builder.push("AND mods.deprecated = false ");
 		}
 
 		if !options.include_nsfw {
-			filters.push("mods.nsfw = false".to_string());
+			builder.push("AND mods.nsfw = false ");
 		}
 
-		filters.push("mods.id NOT IN (SELECT mod_id FROM ratings)".to_string());
+		let ignored_categories = &options.ignored_categories;
+		if ignored_categories.len() != 0 {
+			builder.push(
+				"AND mods.id NOT IN
+					(SELECT mod_category.mod_id FROM mod_category
+					JOIN categories ON categories.id = mod_category.category_id
+					WHERE categories.name IN ",
+			);
 
-		let where_statement = if filters.len() != 0 {
-			let joined = filters.join(" AND ");
-			format!("WHERE {joined}")
-		} else {
-			"".to_string()
-		};
+			builder.push_tuples(ignored_categories, |mut b, category| {
+				b.push_bind(category);
+			});
 
-		let sql = format!(
-			r#"SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id
-			FROM mods
-			{where_statement}
-			ORDER BY mods.updated_date DESC
-			LIMIT ?;"#
-		);
+			builder.push(") ");
+		}
 
-		let mut statement = self.connection.prepare(&sql)?;
+		let query = builder
+			.push("ORDER BY mods.updated_date DESC ")
+			.push("LIMIT ")
+			.push_bind(options.limit)
+			.build();
 
-		let mut vars = ignored_categories
-			.iter()
-			.map::<Box<dyn ToSql>, _>(|i| Box::new(i))
-			.collect::<Vec<_>>();
-
-		vars.push(Box::new(options.limit));
-
-		let mods = statement
-			.query_map(params_from_iter(vars), |row| {
-				Ok(Mod {
-					name: row.get(0)?,
-					owner: row.get(1)?,
-					description: row.get(2)?,
-					icon: row.get(3)?,
-					package_url: row.get(4)?,
-					id: row.get(5)?,
-				})
-			})?
+		let mods = query
+			.fetch_all(&self.pool)
+			.await?
+			.into_iter()
+			.map(|row| Mod::from_row(&row))
 			.collect::<Result<_, _>>()?;
-
 		Ok(mods)
 	}
 
-	pub fn insert_categories(
+	pub async fn insert_categories(
 		&self,
 		categories: &HashSet<impl ToString>,
 	) -> Result<(), Box<dyn Error>> {
@@ -102,40 +87,34 @@ impl Database {
 			return Ok(());
 		}
 
-		let sql = format!(
-			"INSERT OR IGNORE INTO categories(name) VALUES {};",
-			repeat_vars(categories.len(), 1)
-		);
+		let categories = categories.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
-		let mut statement = self.connection.prepare(&sql)?;
-		statement.execute(params_from_iter(categories.iter().map(|s| s.to_string())))?;
+		let mut builder = QueryBuilder::new("INSERT INTO categories(name)");
+		builder
+			.push_values(&categories, |mut b, category| {
+				b.push_bind(category);
+			})
+			.push("ON CONFLICT DO NOTHING;");
+
+		let query = builder.build();
+		query.execute(&self.pool).await?;
 
 		Ok(())
 	}
 
-	pub fn get_categories(&self) -> Result<Vec<Category>, Box<dyn Error>> {
-		let mut statement = self
-			.connection
-			.prepare("SELECT id, name FROM categories;")?;
-
-		let categories = statement
-			.query_map([], |row| {
-				Ok(Category {
-					id: row.get(0)?,
-					name: row.get(1)?,
-				})
-			})?
-			.collect::<Result<Vec<_>, _>>()?;
-
+	pub async fn get_categories(&self) -> Result<Vec<Category>, Box<dyn Error>> {
+		let categories = sqlx::query_as("SELECT id, name FROM categories;")
+			.fetch_all(&self.pool)
+			.await?;
 		Ok(categories)
 	}
 
-	pub fn insert_mods(
+	pub async fn insert_mods(
 		&self,
-		mods: &Vec<InsertMod>,
+		mods: &Vec<InsertMod<'_>>,
 		chunk_size: usize,
 	) -> Result<(), Box<dyn Error>> {
-		self.clear_categories_junction_table()?;
+		self.clear_categories_junction_table().await?;
 
 		let mod_chunks = mods.chunks(chunk_size);
 		let mod_chunks_count = mod_chunks.len();
@@ -143,14 +122,14 @@ impl Database {
 		for (index, chunk) in mod_chunks.enumerate() {
 			log::debug!("Inserting mods chunk {}/{}", index + 1, mod_chunks_count);
 
-			self.insert_mods_data(&chunk.iter().collect())?;
+			self.insert_mods_data(&chunk.iter().collect()).await?;
 		}
 
 		let mod_categories = mods
 			.iter()
 			.map(|m| {
 				m.category_ids.iter().map(|c_id| InsertModCategory {
-					mod_id: m.uuid4,
+					mod_id: &m.uuid4,
 					category_id: &c_id,
 				})
 			})
@@ -166,67 +145,89 @@ impl Database {
 				category_chunks_count
 			);
 
-			self.insert_mod_category_junction_data(&chunk.iter().collect())?;
+			self.insert_mod_category_junction_data(&chunk.iter().collect())
+				.await?;
 		}
 
 		Ok(())
 	}
 
-	fn insert_mods_data(&self, mods: &Vec<&InsertMod>) -> Result<(), Box<dyn Error>> {
+	async fn insert_mods_data(&self, mods: &Vec<&InsertMod<'_>>) -> Result<(), Box<dyn Error>> {
 		if mods.len() == 0 {
 			return Ok(());
 		}
 
-		let sql = format!(
-			r#"INSERT OR REPLACE INTO mods
-			(id, name, description, icon_url, full_name, owner, package_url, updated_date, rating, deprecated, nsfw)
-			VALUES {};"#,
-			repeat_vars(mods.len(), 11)
+		let mut builder = QueryBuilder::new(
+			"INSERT INTO mods (id, name, description, icon_url, full_name, owner, package_url, updated_date, rating, deprecated, nsfw) ",
 		);
-		let mut statement = self.connection.prepare(&sql)?;
 
-		let variables = mods.iter().map(|m| m.get_sql_vars()).flatten();
-		statement.execute(params_from_iter(variables))?;
+		builder.push_values(mods, |mut b, m| {
+			b.push_bind(m.uuid4);
+			b.push_bind(m.name);
+			b.push_bind(m.description);
+			b.push_bind(m.icon_url);
+			b.push_bind(m.full_name);
+			b.push_bind(m.owner);
+			b.push_bind(m.package_url);
+			b.push_bind(m.updated_date);
+			b.push_bind(m.rating);
+			b.push_bind(m.is_deprecated);
+			b.push_bind(m.has_nsfw_content);
+		});
 
+		builder.push(
+			" ON CONFLICT(id) DO UPDATE SET
+name        =EXCLUDED.name,
+description =EXCLUDED.description,
+icon_url    =EXCLUDED.icon_url,
+full_name   =EXCLUDED.full_name,
+owner       =EXCLUDED.owner,
+package_url =EXCLUDED.package_url,
+updated_date=EXCLUDED.updated_date,
+rating      =EXCLUDED.rating,
+deprecated  =EXCLUDED.deprecated,
+nsfw        =EXCLUDED.nsfw",
+		);
+
+		let query = builder.build();
+		query.execute(&self.pool).await?;
 		Ok(())
 	}
 
-	fn insert_mod_category_junction_data(
+	async fn insert_mod_category_junction_data(
 		&self,
-		mod_categories: &Vec<&InsertModCategory>,
+		mod_categories: &Vec<&InsertModCategory<'_>>,
 	) -> Result<(), Box<dyn Error>> {
 		if mod_categories.len() == 0 {
 			return Ok(());
 		}
 
-		let sql = format!(
-			"INSERT OR IGNORE INTO mod_category (mod_id, category_id) VALUES {};",
-			repeat_vars(mod_categories.len(), 2)
-		);
+		let mut builder = QueryBuilder::new("INSERT INTO mod_category (mod_id, category_id) ");
+		builder.push_values(mod_categories, |mut b, mod_category| {
+			b.push_bind(mod_category.mod_id)
+				.push_bind(mod_category.category_id);
+		});
+		builder.push("ON CONFLICT DO NOTHING;");
 
-		let mut statement = self.connection.prepare(&sql)?;
-		let variables = mod_categories.iter().map(|mc| mc.get_sql_vars()).flatten();
-
-		statement.execute(params_from_iter(variables))?;
-
+		let query = builder.build();
+		query.execute(&self.pool).await?;
 		Ok(())
 	}
 
-	fn clear_categories_junction_table(&self) -> Result<(), Box<dyn Error>> {
-		let mut statement = self.connection.prepare("DELETE FROM mod_category;")?;
-		statement.execute([])?;
+	async fn clear_categories_junction_table(&self) -> Result<(), Box<dyn Error>> {
+		sqlx::query("DELETE FROM mod_category;")
+			.execute(&self.pool)
+			.await?;
 		Ok(())
 	}
 
-	pub fn latest_mod_update_date(&self) -> Result<Option<UtcDateTime>, Box<dyn Error>> {
-		let mut statement = self
-			.connection
-			.prepare("SELECT date FROM mods_updated_date WHERE mods_updated_date.id = 0;")?;
+	pub async fn latest_mod_import_date(&self) -> Result<Option<Date>, Box<dyn Error>> {
+		let result = sqlx::query("SELECT date FROM mods_imported_date WHERE id = 0;")
+			.fetch_optional(&self.pool)
+			.await?;
 
-		let result: Option<String> = statement.query_row([], |row| Ok(row.get(0)?)).optional()?;
-
-		if let Some(date) = result {
-			let date = UtcDateTime::parse(&date, &Iso8601::DEFAULT)?;
+		if let Some(row) = result {
+			let date = row.try_get::<Date, _>("date")?;
 			Ok(Some(date))
 		} else {
 			// query was ok, but no data found -> no updates have been done to db
@@ -234,121 +235,72 @@ impl Database {
 		}
 	}
 
-	pub fn set_mods_updated_date(&self, timestamp: UtcDateTime) -> Result<(), Box<dyn Error>> {
-		let mut statement = self
-			.connection
-			.prepare("INSERT INTO mods_updated_date (id, date) VALUES (0, ?);")?;
-
-		let str = timestamp.format(&Iso8601::DEFAULT)?;
-		statement.execute([str])?;
-		return Ok(());
-	}
-
-	pub fn insert_mod_rating(&self, mod_id: &str, rating: &Rating) -> Result<(), Box<dyn Error>> {
-		let mut statement = self.connection.prepare(
-			"INSERT INTO ratings(mod_id, rating_id) VALUES (?, (SELECT id FROM rating_type WHERE name = ?));",
-		)?;
-
-		statement.execute((mod_id, rating.to_string()))?;
+	pub async fn set_mods_imported_date(&self, date: Date) -> Result<(), Box<dyn Error>> {
+		sqlx::query("INSERT INTO mods_imported_date (id, date) VALUES (0, $1) ON CONFLICT(id) DO UPDATE SET date = EXCLUDED.date;")
+			.bind(date)
+			.execute(&self.pool)
+			.await?;
 
 		Ok(())
 	}
 
-	pub fn get_rated_mods(
+	pub async fn insert_mod_rating(
+		&self,
+		mod_id: &Uuid,
+		rating: &Rating,
+	) -> Result<(), Box<dyn Error>> {
+		sqlx::query("INSERT INTO ratings(mod_id, rating) VALUES ($1, $2);")
+			.bind(mod_id)
+			.bind(rating)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
+	}
+
+	pub async fn get_rated_mods(
 		&self,
 		rating: &Rating,
-		limit: usize,
+		limit: i16,
 	) -> Result<Vec<Mod>, Box<dyn Error>> {
-		let mut statement = self.connection.prepare(
-			r#"SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id
+		let sql = "SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id
 			FROM mods
-				JOIN ratings ON mods.id = ratings.mod_id
-				JOIN rating_type on rating_type.id = ratings.rating_id
-			WHERE rating_type.name = ?
-			LIMIT ?;"#,
-		)?;
+			JOIN ratings ON mods.id = ratings.mod_id
+			WHERE ratings.rating = $1
+			LIMIT $2;";
 
-		let mods = statement
-			.query_map((rating.to_string(), limit), |row| {
-				Ok(Mod {
-					name: row.get(0)?,
-					owner: row.get(1)?,
-					description: row.get(2)?,
-					icon: row.get(3)?,
-					package_url: row.get(4)?,
-					id: row.get(5)?,
-				})
-			})?
-			.collect::<Result<_, _>>()?;
+		let mods = sqlx::query_as(sql)
+			.bind(rating)
+			.bind(limit)
+			.fetch_all(&self.pool)
+			.await?;
 
 		Ok(mods)
 	}
 }
 
-fn apply_migrations(connection: &mut Connection) -> Result<(), Box<dyn Error>> {
-	static MIGRATION_DIR: Dir = include_dir!("migrations");
-	let migrations = Migrations::from_directory(&MIGRATION_DIR).unwrap();
-	migrations.to_latest(connection)?;
-	Ok(())
-}
-
 pub struct InsertMod<'a> {
-	pub uuid4: &'a String,
+	pub uuid4: Uuid,
 	pub name: &'a String,
 	pub description: &'a str,
 	pub icon_url: &'a str,
 	pub full_name: &'a String,
 	pub owner: &'a String,
 	pub package_url: &'a String,
-	pub updated_date: &'a String,
+	pub updated_date: Date,
 	pub rating: i64,
 	pub is_deprecated: bool,
 	pub has_nsfw_content: bool,
-	pub category_ids: HashSet<&'a i64>,
-}
-
-impl<'a> InsertMod<'a> {
-	fn get_sql_vars(&self) -> Vec<Box<dyn ToSql + '_>> {
-		vec![
-			Box::new(&self.uuid4),
-			Box::new(&self.name),
-			Box::new(&self.description),
-			Box::new(&self.icon_url),
-			Box::new(&self.full_name),
-			Box::new(&self.owner),
-			Box::new(&self.package_url),
-			Box::new(&self.updated_date),
-			Box::new(&self.rating),
-			Box::new(&self.is_deprecated),
-			Box::new(&self.has_nsfw_content),
-		]
-	}
+	pub category_ids: HashSet<&'a i32>,
 }
 
 struct InsertModCategory<'a> {
-	mod_id: &'a String,
-	category_id: &'a i64,
-}
-
-impl<'a> InsertModCategory<'a> {
-	fn get_sql_vars(&self) -> Vec<Box<dyn ToSql + '_>> {
-		vec![Box::new(&self.mod_id), Box::new(&self.category_id)]
-	}
-}
-
-fn repeat_vars(item_count: usize, variable_count: usize) -> String {
-	let mut inner = "?,".repeat(variable_count);
-	// Remove trailing comma
-	inner.pop();
-	let mut outer = format!("({inner}),").repeat(item_count);
-	// Remove trailing comma
-	outer.pop();
-	outer
+	mod_id: &'a Uuid,
+	category_id: &'a i32,
 }
 
 pub struct ModQueryOptions {
 	pub ignored_categories: HashSet<String>,
-	pub limit: usize,
+	pub limit: i32,
 	pub include_deprecated: bool,
 	pub include_nsfw: bool,
 }
@@ -367,63 +319,7 @@ impl Default for ModQueryOptions {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	impl Database {
-		fn open_in_memory() -> Database {
-			let mut connection = Connection::open_in_memory().unwrap();
-			apply_migrations(&mut connection).unwrap();
-
-			Database { connection }
-		}
-
-		fn insert_test_data(&self) {
-			let insert_categories = r#"
-			INSERT INTO categories(id, name) VALUES
-			(0, 'Suits'),
-			(1, 'Music'),
-			(2, 'TV'),
-			(3, 'Items'),
-			(4, 'Misc');
-			"#;
-
-			let insert_mods = r#"
-			INSERT INTO mods
-			(id,      name,          updated_date,                  deprecated, nsfw,  description, icon_url, full_name, owner, package_url, rating) VALUES
-			('id-1',  '1st',         '2025-03-20T10:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('id-2',  'dep-mod',     '2025-03-20T09:00:00.000000Z', true,       false, '',          '',       '',        '',    '',          0),
-			('id-3',  'nsfw-mod',    '2025-03-20T08:00:00.000000Z', false,      true,  '',          '',       '',        '',    '',          0),
-			('id-4',  'dep-nsfw',    '2025-03-20T07:00:00.000000Z', true,       true,  '',          '',       '',        '',    '',          0),
-			('id-5',  '5th',         '2025-03-09T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('id-6',  '6th',         '2025-03-08T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('id-7',  'nsfw-2',      '2025-03-07T00:00:00.000000Z', false,      true,  '',          '',       '',        '',    '',          0),
-			('id-8',  'no-category', '2025-03-06T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('id-9',  'new-update',  '2025-03-21T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0),
-			('id-10', 'old-mod',     '2020-01-01T00:00:00.000000Z', false,      false, '',          '',       '',        '',    '',          0);
-			"#;
-
-			let insert_mod_category = r#"
-			INSERT INTO mod_category(category_id, mod_id) VALUES
-			(1, 'id-5'),
-			(1, 'id-6'),
-
-			(2, 'id-5'),
-
-			(3, 'id-1'),
-			(3, 'id-2'),
-			(3, 'id-3'),
-			(3, 'id-4'),
-			(3, 'id-5'),
-
-			(4, 'id-1'),
-			(4, 'id-5'),
-			(4, 'id-7');
-			"#;
-
-			self.connection.execute(insert_categories, []).unwrap();
-			self.connection.execute(insert_mods, []).unwrap();
-			self.connection.execute(insert_mod_category, []).unwrap();
-		}
-	}
+	use time::format_description::well_known::Iso8601;
 
 	fn hashset_of(items: Vec<&str>) -> HashSet<String> {
 		items.into_iter().map(|s| s.to_string()).collect()
@@ -433,42 +329,18 @@ mod tests {
 		mods.into_iter().map(|m| m.name).collect()
 	}
 
-	#[test]
-	fn repeating_vars_works_correctly() {
-		assert_eq!(repeat_vars(1, 1), "(?)", "one variable repeated once");
+	#[sqlx::test(fixtures("mods"))]
+	async fn querying_mods_without_ignored_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		assert_eq!(
-			repeat_vars(3, 1),
-			"(?),(?),(?)",
-			"one variable repeated many times"
-		);
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: true,
+		};
 
-		assert_eq!(
-			repeat_vars(1, 4),
-			"(?,?,?,?)",
-			"multiple variables repeated once"
-		);
-
-		assert_eq!(
-			repeat_vars(3, 2),
-			"(?,?),(?,?),(?,?)",
-			"multiple variables repeated many times"
-		);
-	}
-
-	#[test]
-	fn querying_mods_without_ignored_categories() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
-
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: true,
-			})
-			.unwrap();
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -487,19 +359,18 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[test]
-	fn querying_mods_ignored_categories() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
+	#[sqlx::test(fixtures("mods"))]
+	async fn querying_mods_ignored_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: hashset_of(vec!["Items", "Misc"]),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: true,
-			})
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: hashset_of(vec!["Items", "Misc"]),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: true,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec!["6th", "no-category", "new-update", "old-mod"]);
 
@@ -507,19 +378,18 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[test]
-	fn querying_mods_allowing_deprecated() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
+	#[sqlx::test(fixtures("mods"))]
+	async fn querying_mods_allowing_deprecated(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: false,
-			})
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: false,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -535,19 +405,18 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[test]
-	fn querying_non_deprecated_mods() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
+	#[sqlx::test(fixtures("mods"))]
+	async fn querying_non_deprecated_mods(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: false,
-				include_nsfw: false,
-			})
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: false,
+			include_nsfw: false,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -562,19 +431,18 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[test]
-	fn querying_non_deprecated_mods_ignoring_categories() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
+	#[sqlx::test(fixtures("mods"))]
+	async fn querying_non_deprecated_mods_ignoring_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: hashset_of(vec!["Music", "Suits"]),
-				limit: 100,
-				include_deprecated: false,
-				include_nsfw: false,
-			})
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: hashset_of(vec!["Music", "Suits"]),
+			limit: 100,
+			include_deprecated: false,
+			include_nsfw: false,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec!["1st", "no-category", "new-update", "old-mod"]);
 
@@ -582,19 +450,18 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[test]
-	fn querying_non_deprecated_nswf_mods_ignoring_categories() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
+	#[sqlx::test(fixtures("mods"))]
+	async fn querying_non_deprecated_nswf_mods_ignoring_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: hashset_of(vec!["TV", "Suits", "Misc"]),
-				limit: 100,
-				include_deprecated: false,
-				include_nsfw: true,
-			})
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: hashset_of(vec!["TV", "Suits", "Misc"]),
+			limit: 100,
+			include_deprecated: false,
+			include_nsfw: true,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"nsfw-mod",
@@ -608,19 +475,18 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[test]
-	fn querying_mods_most_recently_updated_is_first() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
+	#[sqlx::test(fixtures("mods"))]
+	async fn querying_mods_most_recently_updated_is_first(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 4,
-				include_deprecated: false,
-				include_nsfw: false,
-			})
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 4,
+			include_deprecated: false,
+			include_nsfw: false,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let expected = vec!["new-update", "1st", "5th", "6th"];
 
@@ -628,50 +494,50 @@ mod tests {
 		assert_eq!(expected, mods);
 	}
 
-	#[test]
-	fn get_mod_update_date_from_empty_database() {
-		let db = Database::open_in_memory();
+	#[sqlx::test]
+	async fn get_mod_import_date_from_empty_database(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let last_update = db.latest_mod_update_date().unwrap();
-		assert_eq!(None, last_update);
+		let date = db.latest_mod_import_date().await.unwrap();
+		assert_eq!(None, date);
 	}
 
-	#[test]
-	fn set_and_get_mod_update_date() {
-		let db = Database::open_in_memory();
+	#[sqlx::test]
+	async fn set_and_get_mod_import_date(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let timestamp =
-			UtcDateTime::parse("2025-03-22T12:45:56.001122Z", &Iso8601::DEFAULT).unwrap();
-		db.set_mods_updated_date(timestamp).unwrap();
+		let timestamp = Date::parse("2025-03-22T12:45:56.001122Z", &Iso8601::DEFAULT).unwrap();
+		db.set_mods_imported_date(timestamp).await.unwrap();
 
-		let latest_update = db.latest_mod_update_date().unwrap().unwrap();
-		assert_eq!(timestamp, latest_update);
+		let date = db.latest_mod_import_date().await.unwrap().unwrap();
+		assert_eq!(timestamp, date);
 	}
 
-	#[test]
-	fn set_mod_update_date_multiple_times() {
-		let db = Database::open_in_memory();
+	#[sqlx::test]
+	async fn set_mod_import_date_multiple_times(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		let old = UtcDateTime::parse("2000-01-01T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
-		let mid = UtcDateTime::parse("2002-02-22T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
-		let new = UtcDateTime::parse("2025-03-03T03:03:03.000000Z", &Iso8601::DEFAULT).unwrap();
+		let old = Date::parse("2000-01-01T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
+		let mid = Date::parse("2002-02-22T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
+		let new = Date::parse("2025-03-03T03:03:03.000000Z", &Iso8601::DEFAULT).unwrap();
 
-		db.set_mods_updated_date(old).unwrap();
-		db.set_mods_updated_date(mid).unwrap();
-		db.set_mods_updated_date(new).unwrap();
+		db.set_mods_imported_date(old).await.unwrap();
+		db.set_mods_imported_date(mid).await.unwrap();
+		db.set_mods_imported_date(new).await.unwrap();
 
-		let latest_update = db.latest_mod_update_date().unwrap().unwrap();
-		assert_eq!(new, latest_update);
+		let date = db.latest_mod_import_date().await.unwrap().unwrap();
+		assert_eq!(new, date);
 	}
 
-	#[test]
-	fn insert_and_query_categories() {
-		let db = Database::open_in_memory();
+	#[sqlx::test]
+	async fn insert_and_query_categories(pool: Pool<Postgres>) {
+		let db = Database { pool };
 		let categories = hashset_of(vec!["Foo", "Bar", "Baz", "Cat", "Dog"]);
-		db.insert_categories(&categories).unwrap();
+		db.insert_categories(&categories).await.unwrap();
 
 		let result = db
 			.get_categories()
+			.await
 			.unwrap()
 			.into_iter()
 			.map(|ctg| ctg.name)
@@ -681,63 +547,64 @@ mod tests {
 		assert_eq!(expected, result);
 	}
 
-	#[test]
-	fn inserting_and_querying_mods() {
+	#[sqlx::test]
+	async fn inserting_and_querying_mods(pool: Pool<Postgres>) {
 		let null = "".to_string();
 
-		let db = Database::open_in_memory();
-
-		db.connection
-			.execute(
-				"INSERT INTO categories(id, name) VALUES (0, 'first'), (1, 'second'), (2, 'third');",
-				[],
-			)
+		let db = Database { pool };
+		db.insert_categories(&hashset_of(vec!["first", "second", "third"]))
+			.await
 			.unwrap();
+		let categories = db.get_categories().await.unwrap();
 
 		let m1 = Mod {
 			name: "mod-1".to_string(),
 			owner: "cat".to_string(),
 			description: "first mod".to_string(),
-			icon: "icon-1 url".to_string(),
+			icon_url: "icon-1 url".to_string(),
 			package_url: "package-1 url".to_string(),
-			id: "id-1".to_string(),
+			id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
 		};
-		let date_1 = "2025-03-22T19:59:59.012345Z".to_string();
+		let date_1 = Date::parse("2025-03-22T19:59:59.012345Z", &Iso8601::DEFAULT).unwrap();
 
 		let m2 = Mod {
 			name: "mod-2".to_string(),
 			owner: "dog".to_string(),
 			description: "second mod".to_string(),
-			icon: "icon-2 url".to_string(),
+			icon_url: "icon-2 url".to_string(),
 			package_url: "package-2 url".to_string(),
-			id: "id-2".to_string(),
+			id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
 		};
-		let date_2 = "2025-03-22T22:22:22.222222Z".to_string();
+		let date_2 = Date::parse("2025-03-22T22:22:22.222222Z", &Iso8601::DEFAULT).unwrap();
 
 		let mods = vec![
 			InsertMod {
-				uuid4: &m1.id,
+				uuid4: m1.id.clone(),
 				name: &m1.name,
 				description: &m1.description,
-				icon_url: &m1.icon,
+				icon_url: &m1.icon_url,
 				owner: &m1.owner,
 				package_url: &m1.package_url,
 				full_name: &null,
-				updated_date: &date_1,
+				updated_date: date_1,
 				rating: 12345,
 				is_deprecated: false,
 				has_nsfw_content: false,
-				category_ids: HashSet::from_iter(vec![&0, &1, &2]),
+				category_ids: HashSet::from_iter(vec![
+					&categories.get(0).unwrap().id,
+					&categories.get(1).unwrap().id,
+					&categories.get(2).unwrap().id,
+				]),
 			},
 			InsertMod {
-				uuid4: &m2.id,
+				uuid4: m2.id.clone(),
 				name: &m2.name,
 				description: &m2.description,
-				icon_url: &m2.icon,
+				icon_url: &m2.icon_url,
 				owner: &m2.owner,
 				package_url: &m2.package_url,
 				full_name: &null,
-				updated_date: &date_2,
+				updated_date: date_2,
 				rating: 54321,
 				is_deprecated: true,
 				has_nsfw_content: true,
@@ -745,16 +612,16 @@ mod tests {
 			},
 		];
 
-		db.insert_mods(&mods, 150).unwrap();
+		db.insert_mods(&mods, 150).await.unwrap();
 
-		let mut result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: true,
-			})
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: true,
+		};
+
+		let mut result = db.get_mods(&query_options).await.unwrap();
 		result.sort_by(|a, b| a.name.cmp(&b.name));
 
 		let mut expected = vec![m1, m2];
@@ -763,22 +630,31 @@ mod tests {
 		assert_eq!(expected, result);
 	}
 
-	#[test]
-	fn rated_mods_are_omitted_from_queries() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
+	#[sqlx::test(fixtures("mods"))]
+	async fn rated_mods_are_omitted_from_queries(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		db.insert_mod_rating("id-5", &Rating::Like).unwrap();
-		db.insert_mod_rating("id-6", &Rating::Dislike).unwrap();
+		db.insert_mod_rating(
+			&Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
+			&Rating::Like,
+		)
+		.await
+		.unwrap();
+		db.insert_mod_rating(
+			&Uuid::parse_str("00000000-0000-0000-0000-000000000006").unwrap(),
+			&Rating::Dislike,
+		)
+		.await
+		.unwrap();
 
-		let result = db
-			.get_mods(&ModQueryOptions {
-				ignored_categories: Default::default(),
-				limit: 100,
-				include_deprecated: true,
-				include_nsfw: true,
-			})
-			.unwrap();
+		let query_options = ModQueryOptions {
+			ignored_categories: Default::default(),
+			limit: 100,
+			include_deprecated: true,
+			include_nsfw: true,
+		};
+
+		let result = db.get_mods(&query_options).await.unwrap();
 
 		let mods = mod_names(result);
 		let expected = hashset_of(vec![
@@ -795,17 +671,36 @@ mod tests {
 		assert_eq!(expected, mods);
 	}
 
-	#[test]
-	fn querying_rated_mods() {
-		let db = Database::open_in_memory();
-		db.insert_test_data();
+	#[sqlx::test(fixtures("mods"))]
+	async fn querying_rated_mods(pool: Pool<Postgres>) {
+		let db = Database { pool };
 
-		db.insert_mod_rating("id-2", &Rating::Like).unwrap();
-		db.insert_mod_rating("id-3", &Rating::Dislike).unwrap();
-		db.insert_mod_rating("id-4", &Rating::Dislike).unwrap();
-		db.insert_mod_rating("id-5", &Rating::Like).unwrap();
+		db.insert_mod_rating(
+			&Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+			&Rating::Like,
+		)
+		.await
+		.unwrap();
+		db.insert_mod_rating(
+			&Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
+			&Rating::Dislike,
+		)
+		.await
+		.unwrap();
+		db.insert_mod_rating(
+			&Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
+			&Rating::Dislike,
+		)
+		.await
+		.unwrap();
+		db.insert_mod_rating(
+			&Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
+			&Rating::Like,
+		)
+		.await
+		.unwrap();
 
-		let result = db.get_rated_mods(&Rating::Like, 100).unwrap();
+		let result = db.get_rated_mods(&Rating::Like, 100).await.unwrap();
 
 		let mods = mod_names(result);
 		let expected = hashset_of(vec!["dep-mod", "5th"]);
