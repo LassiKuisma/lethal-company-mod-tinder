@@ -6,13 +6,18 @@ edition = "2024"
 [dependencies]
 actix-files = "0.6.6"
 actix-web = "4.10.2"
+actix-web-httpauth = "0.8.2"
+argon2 = "0.5.3"
 curl = "0.4.47"
 dotenvy = "0.15.7"
 env_logger = "0.11.7"
+hmac = "0.12.1"
 include_dir = "0.7.4"
+jwt = "0.16.0"
 log = "0.4.27"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+sha2 = "0.10.8"
 sqlx = { version = "0.8.3", features = ["postgres", "migrate", "runtime-tokio", "uuid", "time"] }
 tera = "1.20.0"
 tera-hot-reload = "0.2.4"

@@ -17,6 +17,7 @@ use uuid::Uuid;
 mod db;
 mod env;
 mod mods;
+mod services;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

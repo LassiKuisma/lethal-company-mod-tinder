@@ -4,7 +4,10 @@ use sqlx::{FromRow, Pool, Postgres, QueryBuilder, Row, postgres::PgPoolOptions};
 use time::Date;
 use uuid::Uuid;
 
-use crate::mods::{Category, Mod, Rating};
+use crate::{
+	mods::{Category, Mod, Rating},
+	services::users::{User, UserNoId},
+};
 
 #[derive(Clone)]
 pub struct Database {
@@ -275,6 +278,26 @@ nsfw        =EXCLUDED.nsfw",
 			.await?;
 
 		Ok(mods)
+	}
+
+	pub async fn insert_user(&self, user: &UserNoId) -> Result<(), Box<dyn Error>> {
+		sqlx::query("INSERT INTO users(username, password_hash) VALUES ($1, $2);")
+			.bind(&user.username)
+			.bind(&user.password_hash)
+			.execute(&self.pool)
+			.await?;
+
+		Ok(())
+	}
+
+	pub async fn find_user(&self, name: &str) -> Result<Option<User>, Box<dyn Error>> {
+		let result =
+			sqlx::query_as("SELECT id, username, password_hash FROM users WHERE username = $1;")
+				.bind(name)
+				.fetch_optional(&self.pool)
+				.await?;
+
+		Ok(result)
 	}
 }
 
@@ -706,5 +729,57 @@ mod tests {
 		let expected = hashset_of(vec!["dep-mod", "5th"]);
 
 		assert_eq!(expected, mods);
+	}
+
+	#[sqlx::test]
+	async fn insert_and_find_users(pool: Pool<Postgres>) {
+		let db = Database { pool };
+
+		let first = UserNoId {
+			username: "First".to_string(),
+			password_hash: "aaaa".to_string(),
+		};
+
+		let second = UserNoId {
+			username: "Second".to_string(),
+			password_hash: "bbbb".to_string(),
+		};
+
+		let third = UserNoId {
+			username: "Third".to_string(),
+			password_hash: "cccc".to_string(),
+		};
+
+		db.insert_user(&first).await.unwrap();
+		db.insert_user(&second).await.unwrap();
+		db.insert_user(&third).await.unwrap();
+
+		let result = db
+			.find_user("Second")
+			.await
+			.unwrap()
+			.expect("No user found");
+		assert_eq!(result.username, "Second");
+		assert_eq!(result.password_hash, "bbbb");
+	}
+
+	#[sqlx::test]
+	async fn inserting_non_unique_user(pool: Pool<Postgres>) {
+		let db = Database { pool };
+
+		let first = UserNoId {
+			username: "Taken".to_string(),
+			password_hash: "aaaa".to_string(),
+		};
+
+		let second = UserNoId {
+			username: "Taken".to_string(),
+			password_hash: "bbbb".to_string(),
+		};
+
+		let _ = db.insert_user(&first).await.unwrap();
+
+		let result = db.insert_user(&second).await;
+		assert!(result.is_err());
 	}
 }
