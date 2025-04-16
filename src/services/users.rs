@@ -1,13 +1,14 @@
+use actix_files::NamedFile;
 use actix_web::{
 	HttpMessage, HttpResponse, Responder,
-	dev::ServiceRequest,
-	get, post,
-	web::{Data, Json},
-};
-use actix_web_httpauth::extractors::{
-	AuthenticationError,
-	basic::BasicAuth,
-	bearer::{self, BearerAuth},
+	body::MessageBody,
+	cookie::Cookie,
+	dev::{ServiceRequest, ServiceResponse},
+	get,
+	http::StatusCode,
+	middleware::Next,
+	post,
+	web::{Data, Form, Json},
 };
 use argon2::{
 	Argon2,
@@ -35,34 +36,35 @@ pub struct UserNoId {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TokenClaims {
-	id: i32,
+	pub id: i32,
 }
 
 pub async fn validator(
 	req: ServiceRequest,
-	credentials: BearerAuth,
-) -> Result<ServiceRequest, (actix_web::Error, ServiceRequest)> {
+	next: Next<impl MessageBody>,
+) -> Result<ServiceResponse<impl MessageBody>, actix_web::Error> {
 	let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is not set");
 	let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_secret.as_bytes()).unwrap();
-	let token_string = credentials.token();
 
-	let claims: Result<TokenClaims, _> = token_string.verify_with_key(&key);
+	if let Some(cookie) = req.cookie("lcmt-login") {
+		let token_string = cookie.value();
+		let claims: Result<TokenClaims, _> = token_string.verify_with_key(&key);
 
-	match claims {
-		Ok(value) => {
-			req.extensions_mut().insert(value);
-			Ok(req)
+		match claims {
+			Ok(value) => {
+				req.extensions_mut().insert(value);
+			}
+			Err(_) => {
+				return Err(actix_web::error::ErrorUnauthorized(
+					"Incorrect username or password",
+				));
+			}
 		}
-		Err(_) => {
-			let config = req
-				.app_data::<bearer::Config>()
-				.cloned()
-				.unwrap_or_default()
-				.scope("");
-
-			Err((AuthenticationError::from(config).into(), req))
-		}
+	} else {
+		log::info!("login-cookie not found");
 	}
+
+	next.call(req).await
 }
 
 #[derive(Deserialize)]
@@ -71,7 +73,7 @@ struct CreateUserBody {
 	password: String,
 }
 
-#[post("/user")]
+#[post("/create-user")]
 async fn create_user(db: Data<Database>, body: Json<CreateUserBody>) -> impl Responder {
 	let user = body.into_inner();
 
@@ -95,25 +97,18 @@ async fn create_user(db: Data<Database>, body: Json<CreateUserBody>) -> impl Res
 	}
 }
 
-#[derive(Serialize, FromRow)]
-struct AuthUser {
-	id: i32,
+#[derive(Deserialize)]
+struct LoginCredentials {
 	username: String,
 	password: String,
 }
 
-#[get("/auth")]
-async fn basic_auth(db: Data<Database>, credentials: BasicAuth) -> impl Responder {
+#[post("/auth")]
+async fn basic_auth(db: Data<Database>, body: Form<LoginCredentials>) -> impl Responder {
 	let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is not set");
 	let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_secret.as_bytes()).unwrap();
 
-	let username = credentials.user_id();
-	let password = match credentials.password() {
-		Some(password) => password,
-		None => return HttpResponse::Unauthorized().json("Must provide username and password"),
-	};
-
-	let user = match db.find_user(username).await {
+	let user = match db.find_user(&body.username).await {
 		Ok(Some(user)) => user,
 		Ok(None) => return HttpResponse::Unauthorized().json("Incorrect username or password"),
 		Err(_) => return HttpResponse::InternalServerError().finish(),
@@ -121,13 +116,34 @@ async fn basic_auth(db: Data<Database>, credentials: BasicAuth) -> impl Responde
 
 	let hash = PasswordHash::new(&user.password_hash).unwrap();
 	let argon2 = Argon2::default();
-	let is_valid = argon2.verify_password(password.as_bytes(), &hash).is_ok();
+	let is_valid = argon2
+		.verify_password(body.password.as_bytes(), &hash)
+		.is_ok();
 
 	if is_valid {
 		let claims = TokenClaims { id: user.id };
 		let token_str = claims.sign_with_key(&key).unwrap();
-		HttpResponse::Ok().json(token_str)
+		let cookie = Cookie::build("lcmt-login", &token_str)
+			.secure(true)
+			.http_only(true)
+			.finish();
+
+		HttpResponse::Ok().cookie(cookie).json("Login successful")
 	} else {
 		HttpResponse::Unauthorized().json("Incorrect username or password")
 	}
+}
+
+#[get("/login")]
+async fn login_page() -> Result<impl Responder, actix_web::Error> {
+	Ok(NamedFile::open("static/login.html")?
+		.customize()
+		.with_status(StatusCode::OK))
+}
+
+#[get("/create-user")]
+async fn create_user_page() -> Result<impl Responder, actix_web::Error> {
+	Ok(NamedFile::open("static/create_user.html")?
+		.customize()
+		.with_status(StatusCode::OK))
 }

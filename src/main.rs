@@ -1,16 +1,19 @@
-use std::{sync::Mutex, time::Duration};
+use std::{io::Read, sync::Mutex, time::Duration};
 
 use actix_files::NamedFile;
 use actix_web::{
 	App, Either, HttpResponse, HttpServer, Responder, get,
 	http::{Method, StatusCode},
 	middleware, post,
-	web::{self, Data, Form, Html},
+	web::{self, Data, Form, Html, ReqData},
 };
 use db::{Database, ModQueryOptions};
 use env::Env;
 use mods::{Rating, refresh_mods};
 use serde::Deserialize;
+use services::users::{
+	TokenClaims, basic_auth, create_user, create_user_page, login_page, validator,
+};
 use tera::{Context, Tera};
 use uuid::Uuid;
 
@@ -49,15 +52,25 @@ async fn main() -> std::io::Result<()> {
 	log::info!("Starting server on port {port}");
 
 	HttpServer::new(move || {
+		let validator_middleware = middleware::from_fn(validator);
+
 		App::new()
 			.wrap(middleware::Logger::default())
 			.app_data(Data::new(db.clone()))
 			.app_data(tera.clone())
 			.service(favicon)
 			.service(welcome_page)
-			.service(get_rating_page)
-			.service(post_rating)
-			.service(rated_mods)
+			.service(create_user)
+			.service(create_user_page)
+			.service(basic_auth)
+			.service(login_page)
+			.service(
+				web::scope("")
+					.wrap(validator_middleware)
+					.service(get_rating_page)
+					.service(post_rating)
+					.service(rated_mods),
+			)
 			.default_service(web::to(default_handler))
 	})
 	.bind(("0.0.0.0", port))?
@@ -81,8 +94,16 @@ async fn welcome_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Er
 async fn get_rating_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
+	req_user: Option<ReqData<TokenClaims>>,
 ) -> Result<Html, actix_web::Error> {
-	rating_page(template, db).await
+	let user = match req_user {
+		Some(user) => user.into_inner(),
+		None => {
+			return not_logged_in().await;
+		}
+	};
+
+	rating_page(template, db, user.id).await
 }
 
 #[post("/rate")]
@@ -90,21 +111,37 @@ async fn post_rating(
 	params: Form<RatingForm>,
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
+	req_user: Option<ReqData<TokenClaims>>,
 ) -> Result<Html, actix_web::Error> {
+	let user = match req_user {
+		Some(user) => user.into_inner(),
+		None => {
+			return not_logged_in().await;
+		}
+	};
+
 	let uuid = Uuid::parse_str(&params.mod_id)
 		.map_err(|_| actix_web::error::ErrorBadRequest("Bad mod uuid"))?;
-	db.insert_mod_rating(&uuid, &params.rating).await?;
+	db.insert_mod_rating(&uuid, &params.rating, user.id).await?;
 
-	rating_page(template, db).await
+	rating_page(template, db, user.id).await
 }
 
 #[get("/likes")]
 async fn rated_mods(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
+	req_user: Option<ReqData<TokenClaims>>,
 ) -> Result<Html, actix_web::Error> {
+	let user = match req_user {
+		Some(user) => user.into_inner(),
+		None => {
+			return not_logged_in().await;
+		}
+	};
+
 	let mods = db
-		.get_rated_mods(&Rating::Like, 100)
+		.get_rated_mods(&Rating::Like, 100, user.id)
 		.await
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
@@ -140,6 +177,7 @@ async fn default_handler(req_method: Method) -> actix_web::Result<impl Responder
 async fn rating_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
+	user_id: i32,
 ) -> Result<Html, actix_web::Error> {
 	let mut ctx = Context::new();
 
@@ -151,7 +189,7 @@ async fn rating_page(
 	};
 
 	let mods = db
-		.get_mods(&options)
+		.get_mods(&options, user_id)
 		.await
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
@@ -173,6 +211,13 @@ async fn rating_page(
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
 
 	Ok(Html::new(html))
+}
+
+async fn not_logged_in() -> actix_web::Result<Html> {
+	let mut file = NamedFile::open("static/not_logged_in.html")?;
+	let mut buf = String::new();
+	file.read_to_string(&mut buf)?;
+	Ok(Html::new(buf))
 }
 
 #[derive(Deserialize)]
