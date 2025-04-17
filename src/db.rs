@@ -291,14 +291,26 @@ nsfw        =EXCLUDED.nsfw",
 		Ok(mods)
 	}
 
-	pub async fn insert_user(&self, user: &UserNoId) -> Result<(), Box<dyn Error>> {
-		sqlx::query("INSERT INTO users(username, password_hash) VALUES ($1, $2);")
-			.bind(&user.username)
-			.bind(&user.password_hash)
-			.execute(&self.pool)
-			.await?;
+	/// return Ok(true) if new user was created, Ok(false) if username is already taken
+	pub async fn insert_user(&self, user: &UserNoId) -> Result<bool, Box<dyn Error>> {
+		let result = sqlx::query(
+			"INSERT INTO users(username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING;",
+		)
+		.bind(&user.username)
+		.bind(&user.password_hash)
+		.execute(&self.pool)
+		.await?;
 
-		Ok(())
+		match result.rows_affected() {
+			1 => Ok(true),
+			0 => Ok(false),
+			n => {
+				log::error!(
+					"Error inserting user into database, expected query to return at most one row, it returned {n}. User to insert: {user:?}",
+				);
+				Err("Unknown database error".into())
+			}
+		}
 	}
 
 	pub async fn find_user(&self, name: &str) -> Result<Option<User>, Box<dyn Error>> {
@@ -743,9 +755,18 @@ mod tests {
 			password_hash: "cccc".to_string(),
 		};
 
-		db.insert_user(&first).await.unwrap();
-		db.insert_user(&second).await.unwrap();
-		db.insert_user(&third).await.unwrap();
+		assert!(
+			db.insert_user(&first).await.unwrap(),
+			"Failed to insert first user"
+		);
+		assert!(
+			db.insert_user(&second).await.unwrap(),
+			"Failed to insert second user"
+		);
+		assert!(
+			db.insert_user(&third).await.unwrap(),
+			"Failed to insert third user"
+		);
 
 		let result = db
 			.find_user("Second")
@@ -770,9 +791,15 @@ mod tests {
 			password_hash: "bbbb".to_string(),
 		};
 
-		let _ = db.insert_user(&first).await.unwrap();
+		assert!(
+			db.insert_user(&first).await.unwrap(),
+			"Failed to insert user"
+		);
 
-		let result = db.insert_user(&second).await;
-		assert!(result.is_err());
+		let result = db.insert_user(&second).await.unwrap();
+		assert_eq!(
+			result, false,
+			"Expected 'false' when trying to insert duplicate user"
+		);
 	}
 }

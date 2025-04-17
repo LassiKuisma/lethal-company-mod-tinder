@@ -29,6 +29,7 @@ pub struct User {
 	pub password_hash: String,
 }
 
+#[derive(Debug)]
 pub struct UserNoId {
 	pub username: String,
 	pub password_hash: String,
@@ -74,7 +75,7 @@ struct CreateUserBody {
 }
 
 #[post("/create-user")]
-async fn create_user(db: Data<Database>, body: Json<CreateUserBody>) -> impl Responder {
+async fn create_user(db: Data<Database>, body: Form<CreateUserBody>) -> impl Responder {
 	let user = body.into_inner();
 
 	let argon2 = Argon2::default();
@@ -91,9 +92,9 @@ async fn create_user(db: Data<Database>, body: Json<CreateUserBody>) -> impl Res
 
 	match db.insert_user(&user).await {
 		// TODO: return jwt token? (log in when creating account)
-		Ok(_) => HttpResponse::Ok(),
-		// TODO: return "invalid request" if username is already taken
-		Err(_) => HttpResponse::InternalServerError(),
+		Ok(true) => HttpResponse::Ok().finish(),
+		Ok(false) => HttpResponse::Conflict().json("That username is already taken"),
+		Err(_) => HttpResponse::InternalServerError().json("Database error"),
 	}
 }
 
