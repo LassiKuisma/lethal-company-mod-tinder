@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use actix_files::NamedFile;
 use actix_web::{
 	HttpMessage, HttpResponse, Responder,
@@ -8,7 +10,7 @@ use actix_web::{
 	http::StatusCode,
 	middleware::Next,
 	post,
-	web::{Data, Form, Json},
+	web::{Data, Form},
 };
 use argon2::{
 	Argon2,
@@ -19,6 +21,7 @@ use jwt::{SignWithKey, VerifyWithKey};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sqlx::prelude::FromRow;
+use tera::{Context, Tera};
 
 use crate::db::Database;
 
@@ -147,4 +150,20 @@ async fn create_user_page() -> Result<impl Responder, actix_web::Error> {
 	Ok(NamedFile::open("static/create_user.html")?
 		.customize()
 		.with_status(StatusCode::OK))
+}
+
+#[get("/logout")]
+async fn logout(template: Data<Mutex<Tera>>) -> Result<impl Responder, actix_web::Error> {
+	let ctx = Context::new();
+	let html = template
+		.lock()
+		.unwrap()
+		.render("index.html", &ctx)
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
+
+	let cookie = Cookie::build("lcmt-login", "").finish();
+
+	let mut response = HttpResponse::Ok().body(html);
+	response.add_removal_cookie(&cookie)?;
+	Ok(response)
 }

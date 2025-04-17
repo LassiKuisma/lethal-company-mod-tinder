@@ -12,7 +12,7 @@ use env::Env;
 use mods::{Rating, refresh_mods};
 use serde::Deserialize;
 use services::users::{
-	TokenClaims, basic_auth, create_user, create_user_page, login_page, validator,
+	basic_auth, create_user, create_user_page, login_page, logout, validator, TokenClaims
 };
 use tera::{Context, Tera};
 use uuid::Uuid;
@@ -64,6 +64,7 @@ async fn main() -> std::io::Result<()> {
 			.service(create_user_page)
 			.service(basic_auth)
 			.service(login_page)
+			.service(logout)
 			.service(
 				web::scope("")
 					.wrap(validator_middleware)
