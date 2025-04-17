@@ -322,6 +322,15 @@ nsfw        =EXCLUDED.nsfw",
 
 		Ok(result)
 	}
+
+	pub async fn find_user_by_id(&self, id: i32) -> Result<Option<User>, Box<dyn Error>> {
+		let result = sqlx::query_as("SELECT id, username, password_hash FROM users WHERE id = $1;")
+			.bind(id)
+			.fetch_optional(&self.pool)
+			.await?;
+
+		Ok(result)
+	}
 }
 
 pub struct InsertMod<'a> {

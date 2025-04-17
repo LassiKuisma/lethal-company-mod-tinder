@@ -4,20 +4,40 @@ use actix_files::NamedFile;
 use actix_web::{
 	Either, HttpResponse, Responder, get,
 	http::{Method, StatusCode},
-	web::{Data, Html},
+	web::{Data, Html, ReqData},
 };
 use tera::{Context, Tera};
+use users::TokenClaims;
+
+use crate::db::Database;
 
 pub mod ratings;
 pub mod users;
 
 #[get("/")]
-async fn get_home_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
-	home_page(template).await
+async fn get_home_page(
+	template: Data<Mutex<Tera>>,
+	db: Data<Database>,
+	req_user: Option<ReqData<TokenClaims>>,
+) -> Result<Html, actix_web::Error> {
+	home_page(template, db, req_user).await
 }
 
-async fn home_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
-	let ctx = Context::new();
+async fn home_page(
+	template: Data<Mutex<Tera>>,
+	db: Data<Database>,
+	req_user: Option<ReqData<TokenClaims>>,
+) -> Result<Html, actix_web::Error> {
+	let mut ctx = Context::new();
+
+	if let Some(user_id) = req_user.map(|r| r.id) {
+		match db.find_user_by_id(user_id).await {
+			Ok(Some(user)) => ctx.insert("username", &user.username),
+			Ok(None) => return Err(actix_web::error::ErrorBadRequest("Invalid login token")),
+			Err(_) => return Err(actix_web::error::ErrorInternalServerError("Database error")),
+		}
+	}
+
 	let html = template
 		.lock()
 		.unwrap()

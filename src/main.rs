@@ -53,22 +53,19 @@ async fn main() -> std::io::Result<()> {
 
 		App::new()
 			.wrap(middleware::Logger::default())
+			.wrap(validator_middleware)
 			.app_data(Data::new(db.clone()))
 			.app_data(tera.clone())
 			.service(favicon)
-			.service(get_home_page)
 			.service(create_user)
 			.service(create_user_page)
 			.service(basic_auth)
 			.service(login_page)
 			.service(logout)
-			.service(
-				web::scope("")
-					.wrap(validator_middleware)
-					.service(get_rating_page)
-					.service(post_rating)
-					.service(rated_mods),
-			)
+			.service(get_home_page)
+			.service(get_rating_page)
+			.service(post_rating)
+			.service(rated_mods)
 			.default_service(web::to(default_handler))
 	})
 	.bind(("0.0.0.0", port))?

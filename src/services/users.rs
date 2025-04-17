@@ -153,8 +153,14 @@ async fn create_user_page() -> Result<impl Responder, actix_web::Error> {
 }
 
 #[get("/logout")]
-async fn logout(template: Data<Mutex<Tera>>) -> Result<impl Responder, actix_web::Error> {
-	let html = home_page(template).await?;
+async fn logout(
+	template: Data<Mutex<Tera>>,
+	db: Data<Database>,
+) -> Result<impl Responder, actix_web::Error> {
+	// client sent login-data-cookie with this request, don't pass that to render-home-page function
+	// as we will erase that cookie with this response.
+	// TODO: should we show some kind of "logged out - click here to go back to main menu"
+	let html = home_page(template, db, None).await?;
 
 	let mut clear_login = Cookie::new("lcmt-login", "");
 	clear_login.make_removal();

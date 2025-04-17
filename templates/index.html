@@ -5,15 +5,21 @@
     <title>Lethal Company Mod Tinder</title>
   </head>
   <body>
-    <p>Hello and welcome to browsing Lethal Company mods!</p>
-    <a href="create-user">Create user</a>
-    <br />
-    <a href="login">Login</a>
-    <br />
-    <a href="logout">Logout</a>
+    {% if username %}
+    <h1>Welcome {{ username }} to Lethal Company mod tinder</h1>
     <br />
     <a href="rate">Start rating mods</a>
     <br />
     <a href="likes">View your liked mods</a>
+    <br />
+    <a href="logout">Logout</a>
+    {% else %}
+    <h1>Welcome to Lethal Company mod tinder!</h1>
+    <p1>Please login or create user first</p1>
+    <br />
+    <a href="create-user">Create user</a>
+    <br />
+    <a href="login">Login</a>
+    {% endif %}
   </body>
 </html>
