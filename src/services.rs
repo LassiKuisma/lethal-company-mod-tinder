@@ -12,7 +12,11 @@ pub mod ratings;
 pub mod users;
 
 #[get("/")]
-async fn welcome_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
+async fn get_home_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
+	home_page(template).await
+}
+
+async fn home_page(template: Data<Mutex<Tera>>) -> Result<Html, actix_web::Error> {
 	let ctx = Context::new();
 	let html = template
 		.lock()

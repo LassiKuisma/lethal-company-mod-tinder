@@ -8,9 +8,9 @@ use db::Database;
 use env::Env;
 use mods::refresh_mods;
 use services::{
-	default_handler, favicon,
+	default_handler, favicon, get_home_page,
 	ratings::{get_rating_page, post_rating, rated_mods},
-	users::{basic_auth, create_user, create_user_page, login_page, logout, validator}, welcome_page,
+	users::{basic_auth, create_user, create_user_page, login_page, logout, validator},
 };
 use tera::Tera;
 
@@ -56,7 +56,7 @@ async fn main() -> std::io::Result<()> {
 			.app_data(Data::new(db.clone()))
 			.app_data(tera.clone())
 			.service(favicon)
-			.service(welcome_page)
+			.service(get_home_page)
 			.service(create_user)
 			.service(create_user_page)
 			.service(basic_auth)

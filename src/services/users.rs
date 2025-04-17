@@ -21,9 +21,9 @@ use jwt::{SignWithKey, VerifyWithKey};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sqlx::prelude::FromRow;
-use tera::{Context, Tera};
+use tera::Tera;
 
-use crate::db::Database;
+use crate::{db::Database, services::home_page};
 
 #[derive(FromRow)]
 pub struct User {
@@ -154,16 +154,11 @@ async fn create_user_page() -> Result<impl Responder, actix_web::Error> {
 
 #[get("/logout")]
 async fn logout(template: Data<Mutex<Tera>>) -> Result<impl Responder, actix_web::Error> {
-	let ctx = Context::new();
-	let html = template
-		.lock()
-		.unwrap()
-		.render("index.html", &ctx)
-		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
+	let html = home_page(template).await?;
 
-	let cookie = Cookie::build("lcmt-login", "").finish();
+	let mut clear_login = Cookie::new("lcmt-login", "");
+	clear_login.make_removal();
 
-	let mut response = HttpResponse::Ok().body(html);
-	response.add_removal_cookie(&cookie)?;
+	let response = html.customize().add_cookie(&clear_login);
 	Ok(response)
 }
