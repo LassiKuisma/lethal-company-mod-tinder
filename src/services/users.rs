@@ -64,8 +64,6 @@ pub async fn validator(
 				));
 			}
 		}
-	} else {
-		log::info!("login-cookie not found");
 	}
 
 	next.call(req).await
