@@ -1,0 +1,4 @@
+POST http://localhost:3000/auth
+Content-Type: application/x-www-form-urlencoded
+
+username=asd&password=das

@@ -4,7 +4,10 @@ use sqlx::{FromRow, Pool, Postgres, QueryBuilder, Row, postgres::PgPoolOptions};
 use time::Date;
 use uuid::Uuid;
 
-use crate::mods::{Category, Mod, Rating};
+use crate::{
+	mods::{Category, Mod, Rating},
+	services::users::{User, UserNoId},
+};
 
 #[derive(Clone)]
 pub struct Database {
@@ -34,11 +37,17 @@ impl Database {
 		Ok(())
 	}
 
-	pub async fn get_mods(&self, options: &ModQueryOptions) -> Result<Vec<Mod>, Box<dyn Error>> {
+	pub async fn get_mods(
+		&self,
+		options: &ModQueryOptions,
+		user_id: i32,
+	) -> Result<Vec<Mod>, Box<dyn Error>> {
 		let mut builder = QueryBuilder::new(
 			"SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id FROM mods ",
 		);
-		builder.push("WHERE mods.id NOT IN (SELECT mod_id FROM ratings) ");
+		builder.push("WHERE mods.id NOT IN (SELECT mod_id FROM ratings WHERE ratings.user_id =");
+		builder.push_bind(user_id);
+		builder.push(") ");
 
 		if !options.include_deprecated {
 			builder.push("AND mods.deprecated = false ");
@@ -248,10 +257,12 @@ nsfw        =EXCLUDED.nsfw",
 		&self,
 		mod_id: &Uuid,
 		rating: &Rating,
+		user_id: i32,
 	) -> Result<(), Box<dyn Error>> {
-		sqlx::query("INSERT INTO ratings(mod_id, rating) VALUES ($1, $2);")
+		sqlx::query("INSERT INTO ratings(mod_id, rating, user_id) VALUES ($1, $2, $3);")
 			.bind(mod_id)
 			.bind(rating)
+			.bind(user_id)
 			.execute(&self.pool)
 			.await?;
 		Ok(())
@@ -261,20 +272,64 @@ nsfw        =EXCLUDED.nsfw",
 		&self,
 		rating: &Rating,
 		limit: i16,
+		user_id: i32,
 	) -> Result<Vec<Mod>, Box<dyn Error>> {
 		let sql = "SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id
 			FROM mods
 			JOIN ratings ON mods.id = ratings.mod_id
 			WHERE ratings.rating = $1
-			LIMIT $2;";
+			AND ratings.user_id = $2
+			LIMIT $3;";
 
 		let mods = sqlx::query_as(sql)
 			.bind(rating)
+			.bind(user_id)
 			.bind(limit)
 			.fetch_all(&self.pool)
 			.await?;
 
 		Ok(mods)
+	}
+
+	/// return Ok(true) if new user was created, Ok(false) if username is already taken
+	pub async fn insert_user(&self, user: &UserNoId) -> Result<bool, Box<dyn Error>> {
+		let result = sqlx::query(
+			"INSERT INTO users(username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING;",
+		)
+		.bind(&user.username)
+		.bind(&user.password_hash)
+		.execute(&self.pool)
+		.await?;
+
+		match result.rows_affected() {
+			1 => Ok(true),
+			0 => Ok(false),
+			n => {
+				log::error!(
+					"Error inserting user into database, expected query to return at most one row, it returned {n}. User to insert: {user:?}",
+				);
+				Err("Unknown database error".into())
+			}
+		}
+	}
+
+	pub async fn find_user(&self, name: &str) -> Result<Option<User>, Box<dyn Error>> {
+		let result =
+			sqlx::query_as("SELECT id, username, password_hash FROM users WHERE username = $1;")
+				.bind(name)
+				.fetch_optional(&self.pool)
+				.await?;
+
+		Ok(result)
+	}
+
+	pub async fn find_user_by_id(&self, id: i32) -> Result<Option<User>, Box<dyn Error>> {
+		let result = sqlx::query_as("SELECT id, username, password_hash FROM users WHERE id = $1;")
+			.bind(id)
+			.fetch_optional(&self.pool)
+			.await?;
+
+		Ok(result)
 	}
 }
 
@@ -329,7 +384,7 @@ mod tests {
 		mods.into_iter().map(|m| m.name).collect()
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users"))]
 	async fn querying_mods_without_ignored_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
@@ -340,7 +395,7 @@ mod tests {
 			include_nsfw: true,
 		};
 
-		let result = db.get_mods(&query_options).await.unwrap();
+		let result = db.get_mods(&query_options, 0).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -359,7 +414,7 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users"))]
 	async fn querying_mods_ignored_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
@@ -370,7 +425,7 @@ mod tests {
 			include_nsfw: true,
 		};
 
-		let result = db.get_mods(&query_options).await.unwrap();
+		let result = db.get_mods(&query_options, 0).await.unwrap();
 
 		let expected = hashset_of(vec!["6th", "no-category", "new-update", "old-mod"]);
 
@@ -378,7 +433,7 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users"))]
 	async fn querying_mods_allowing_deprecated(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
@@ -389,7 +444,7 @@ mod tests {
 			include_nsfw: false,
 		};
 
-		let result = db.get_mods(&query_options).await.unwrap();
+		let result = db.get_mods(&query_options, 0).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -405,7 +460,7 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users"))]
 	async fn querying_non_deprecated_mods(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
@@ -416,7 +471,7 @@ mod tests {
 			include_nsfw: false,
 		};
 
-		let result = db.get_mods(&query_options).await.unwrap();
+		let result = db.get_mods(&query_options, 0).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"1st",
@@ -431,7 +486,7 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users"))]
 	async fn querying_non_deprecated_mods_ignoring_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
@@ -442,7 +497,7 @@ mod tests {
 			include_nsfw: false,
 		};
 
-		let result = db.get_mods(&query_options).await.unwrap();
+		let result = db.get_mods(&query_options, 0).await.unwrap();
 
 		let expected = hashset_of(vec!["1st", "no-category", "new-update", "old-mod"]);
 
@@ -450,7 +505,7 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users"))]
 	async fn querying_non_deprecated_nswf_mods_ignoring_categories(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
@@ -461,7 +516,7 @@ mod tests {
 			include_nsfw: true,
 		};
 
-		let result = db.get_mods(&query_options).await.unwrap();
+		let result = db.get_mods(&query_options, 0).await.unwrap();
 
 		let expected = hashset_of(vec![
 			"nsfw-mod",
@@ -475,7 +530,7 @@ mod tests {
 		assert_eq!(expected, mod_names);
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users"))]
 	async fn querying_mods_most_recently_updated_is_first(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
@@ -486,7 +541,7 @@ mod tests {
 			include_nsfw: false,
 		};
 
-		let result = db.get_mods(&query_options).await.unwrap();
+		let result = db.get_mods(&query_options, 0).await.unwrap();
 
 		let expected = vec!["new-update", "1st", "5th", "6th"];
 
@@ -547,7 +602,7 @@ mod tests {
 		assert_eq!(expected, result);
 	}
 
-	#[sqlx::test]
+	#[sqlx::test(fixtures("users"))]
 	async fn inserting_and_querying_mods(pool: Pool<Postgres>) {
 		let null = "".to_string();
 
@@ -621,7 +676,7 @@ mod tests {
 			include_nsfw: true,
 		};
 
-		let mut result = db.get_mods(&query_options).await.unwrap();
+		let mut result = db.get_mods(&query_options, 0).await.unwrap();
 		result.sort_by(|a, b| a.name.cmp(&b.name));
 
 		let mut expected = vec![m1, m2];
@@ -630,19 +685,21 @@ mod tests {
 		assert_eq!(expected, result);
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users", "user_ratings"))]
 	async fn rated_mods_are_omitted_from_queries(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
 		db.insert_mod_rating(
 			&Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
 			&Rating::Like,
+			0,
 		)
 		.await
 		.unwrap();
 		db.insert_mod_rating(
 			&Uuid::parse_str("00000000-0000-0000-0000-000000000006").unwrap(),
 			&Rating::Dislike,
+			0,
 		)
 		.await
 		.unwrap();
@@ -654,7 +711,7 @@ mod tests {
 			include_nsfw: true,
 		};
 
-		let result = db.get_mods(&query_options).await.unwrap();
+		let result = db.get_mods(&query_options, 0).await.unwrap();
 
 		let mods = mod_names(result);
 		let expected = hashset_of(vec![
@@ -671,40 +728,87 @@ mod tests {
 		assert_eq!(expected, mods);
 	}
 
-	#[sqlx::test(fixtures("mods"))]
+	#[sqlx::test(fixtures("mods", "users", "user_ratings"))]
 	async fn querying_rated_mods(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		db.insert_mod_rating(
-			&Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
-			&Rating::Like,
-		)
-		.await
-		.unwrap();
-		db.insert_mod_rating(
-			&Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
-			&Rating::Dislike,
-		)
-		.await
-		.unwrap();
-		db.insert_mod_rating(
-			&Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
-			&Rating::Dislike,
-		)
-		.await
-		.unwrap();
-		db.insert_mod_rating(
-			&Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
-			&Rating::Like,
-		)
-		.await
-		.unwrap();
-
-		let result = db.get_rated_mods(&Rating::Like, 100).await.unwrap();
+		// user ratings fixture has an user with this id who has liked and disliked some mods
+		let user_with_ratings_id = 3;
+		let result = db
+			.get_rated_mods(&Rating::Like, 100, user_with_ratings_id)
+			.await
+			.unwrap();
 
 		let mods = mod_names(result);
-		let expected = hashset_of(vec!["dep-mod", "5th"]);
+		let expected = hashset_of(vec!["1st", "nsfw-mod", "new-update"]);
 
 		assert_eq!(expected, mods);
+	}
+
+	#[sqlx::test]
+	async fn insert_and_find_users(pool: Pool<Postgres>) {
+		let db = Database { pool };
+
+		let first = UserNoId {
+			username: "First".to_string(),
+			password_hash: "aaaa".to_string(),
+		};
+
+		let second = UserNoId {
+			username: "Second".to_string(),
+			password_hash: "bbbb".to_string(),
+		};
+
+		let third = UserNoId {
+			username: "Third".to_string(),
+			password_hash: "cccc".to_string(),
+		};
+
+		assert!(
+			db.insert_user(&first).await.unwrap(),
+			"Failed to insert first user"
+		);
+		assert!(
+			db.insert_user(&second).await.unwrap(),
+			"Failed to insert second user"
+		);
+		assert!(
+			db.insert_user(&third).await.unwrap(),
+			"Failed to insert third user"
+		);
+
+		let result = db
+			.find_user("Second")
+			.await
+			.unwrap()
+			.expect("No user found");
+		assert_eq!(result.username, "Second");
+		assert_eq!(result.password_hash, "bbbb");
+	}
+
+	#[sqlx::test]
+	async fn inserting_non_unique_user(pool: Pool<Postgres>) {
+		let db = Database { pool };
+
+		let first = UserNoId {
+			username: "Taken".to_string(),
+			password_hash: "aaaa".to_string(),
+		};
+
+		let second = UserNoId {
+			username: "Taken".to_string(),
+			password_hash: "bbbb".to_string(),
+		};
+
+		assert!(
+			db.insert_user(&first).await.unwrap(),
+			"Failed to insert user"
+		);
+
+		let result = db.insert_user(&second).await.unwrap();
+		assert_eq!(
+			result, false,
+			"Expected 'false' when trying to insert duplicate user"
+		);
 	}
 }

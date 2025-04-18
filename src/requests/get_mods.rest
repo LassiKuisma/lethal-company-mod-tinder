@@ -1,0 +1,2 @@
+GET http://localhost:3000/rate
+Cookie: lcmt-login=eyJhbGciOiJIUzI1NiJ9.eyJpZCI6MX0.bSNZ1HoPrZluR-x1GiNV5lr8WQvcq3wNpyuJd-iAXRQ
