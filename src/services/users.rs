@@ -2,12 +2,12 @@ use std::sync::Mutex;
 
 use actix_files::NamedFile;
 use actix_web::{
-	HttpMessage, HttpResponse, Responder,
+	CustomizeResponder, Either, HttpMessage, HttpResponse, Responder,
 	body::MessageBody,
 	cookie::Cookie,
 	dev::{ServiceRequest, ServiceResponse},
 	get,
-	http::StatusCode,
+	http::{StatusCode, header},
 	middleware::Next,
 	post,
 	web::{Data, Form},
@@ -106,21 +106,28 @@ struct LoginCredentials {
 }
 
 #[post("/auth")]
-async fn basic_auth(db: Data<Database>, body: Form<LoginCredentials>) -> impl Responder {
+async fn basic_auth(
+	db: Data<Database>,
+	body: Form<LoginCredentials>,
+) -> Result<Either<HttpResponse, CustomizeResponder<NamedFile>>, actix_web::Error> {
 	let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is not set");
 	let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_secret.as_bytes()).unwrap();
 
 	let user = match db.find_user(&body.username).await {
 		Ok(Some(user)) => user,
 		Ok(None) => {
-			return NamedFile::open("static/login_failed.html")
-				.customize()
-				.with_status(StatusCode::UNAUTHORIZED);
+			return Ok(Either::Right(
+				NamedFile::open("static/login_failed.html")?
+					.customize()
+					.with_status(StatusCode::UNAUTHORIZED),
+			));
 		}
 		Err(_) => {
-			return NamedFile::open("static/error.html")
-				.customize()
-				.with_status(StatusCode::INTERNAL_SERVER_ERROR);
+			return Ok(Either::Right(
+				NamedFile::open("static/error.html")?
+					.customize()
+					.with_status(StatusCode::INTERNAL_SERVER_ERROR),
+			));
 		}
 	};
 
@@ -138,14 +145,18 @@ async fn basic_auth(db: Data<Database>, body: Form<LoginCredentials>) -> impl Re
 			.http_only(true)
 			.finish();
 
-		NamedFile::open("static/login_ok.html")
-			.customize()
-			.with_status(StatusCode::OK)
-			.add_cookie(&cookie)
+		Ok(Either::Left(
+			HttpResponse::Ok()
+				.cookie(cookie)
+				.append_header((header::REFRESH, "0; url=/"))
+				.finish(),
+		))
 	} else {
-		NamedFile::open("static/login_failed.html")
-			.customize()
-			.with_status(StatusCode::UNAUTHORIZED)
+		Ok(Either::Right(
+			NamedFile::open("static/login_failed.html")?
+				.customize()
+				.with_status(StatusCode::UNAUTHORIZED),
+		))
 	}
 }
 
