@@ -114,8 +114,16 @@ async fn basic_auth(db: Data<Database>, body: Form<LoginCredentials>) -> impl Re
 
 	let user = match db.find_user(&body.username).await {
 		Ok(Some(user)) => user,
-		Ok(None) => return HttpResponse::Unauthorized().json("Incorrect username or password"),
-		Err(_) => return HttpResponse::InternalServerError().finish(),
+		Ok(None) => {
+			return NamedFile::open("static/login_failed.html")
+				.customize()
+				.with_status(StatusCode::UNAUTHORIZED);
+		}
+		Err(_) => {
+			return NamedFile::open("static/error.html")
+				.customize()
+				.with_status(StatusCode::INTERNAL_SERVER_ERROR);
+		}
 	};
 
 	let hash = PasswordHash::new(&user.password_hash).unwrap();
@@ -132,9 +140,14 @@ async fn basic_auth(db: Data<Database>, body: Form<LoginCredentials>) -> impl Re
 			.http_only(true)
 			.finish();
 
-		HttpResponse::Ok().cookie(cookie).json("Login successful")
+		NamedFile::open("static/login_ok.html")
+			.customize()
+			.with_status(StatusCode::OK)
+			.add_cookie(&cookie)
 	} else {
-		HttpResponse::Unauthorized().json("Incorrect username or password")
+		NamedFile::open("static/login_failed.html")
+			.customize()
+			.with_status(StatusCode::UNAUTHORIZED)
 	}
 }
 
