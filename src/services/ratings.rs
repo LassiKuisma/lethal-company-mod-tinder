@@ -10,7 +10,6 @@ use uuid::Uuid;
 use crate::{
 	db::{Database, ModQueryOptions},
 	mods::Rating,
-	services::not_logged_in,
 };
 
 use super::users::TokenClaims;
@@ -19,16 +18,9 @@ use super::users::TokenClaims;
 async fn get_rating_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
-	req_user: Option<ReqData<TokenClaims>>,
+	req_user: ReqData<TokenClaims>,
 ) -> Result<Html, actix_web::Error> {
-	let user = match req_user {
-		Some(user) => user.into_inner(),
-		None => {
-			return not_logged_in().await;
-		}
-	};
-
-	rating_page(template, db, user.id).await
+	rating_page(template, db, req_user.id).await
 }
 
 #[derive(Deserialize)]
@@ -42,37 +34,27 @@ async fn post_rating(
 	params: Form<RatingForm>,
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
-	req_user: Option<ReqData<TokenClaims>>,
+	req_user: ReqData<TokenClaims>,
 ) -> Result<Html, actix_web::Error> {
-	let user = match req_user {
-		Some(user) => user.into_inner(),
-		None => {
-			return not_logged_in().await;
-		}
-	};
+	let user_id = req_user.id;
 
 	let uuid = Uuid::parse_str(&params.mod_id)
 		.map_err(|_| actix_web::error::ErrorBadRequest("Bad mod uuid"))?;
-	db.insert_mod_rating(&uuid, &params.rating, user.id).await?;
+	db.insert_mod_rating(&uuid, &params.rating, user_id).await?;
 
-	rating_page(template, db, user.id).await
+	rating_page(template, db, user_id).await
 }
 
 #[get("/likes")]
 async fn rated_mods(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
-	req_user: Option<ReqData<TokenClaims>>,
+	req_user: ReqData<TokenClaims>,
 ) -> Result<Html, actix_web::Error> {
-	let user = match req_user {
-		Some(user) => user.into_inner(),
-		None => {
-			return not_logged_in().await;
-		}
-	};
+	let user_id = req_user.id;
 
 	let mods = db
-		.get_rated_mods(&Rating::Like, 100, user.id)
+		.get_rated_mods(&Rating::Like, 100, user_id)
 		.await
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 

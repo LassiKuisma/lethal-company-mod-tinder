@@ -1,7 +1,7 @@
 use actix_files::NamedFile;
 use actix_web::{
 	CustomizeResponder, Either, HttpMessage, HttpResponse, Responder,
-	body::MessageBody,
+	body::{BoxBody, MessageBody},
 	cookie::Cookie,
 	dev::{ServiceRequest, ServiceResponse},
 	get,
@@ -42,24 +42,32 @@ pub struct TokenClaims {
 
 pub async fn validator(
 	req: ServiceRequest,
-	next: Next<impl MessageBody>,
+	next: Next<BoxBody>,
 ) -> Result<ServiceResponse<impl MessageBody>, actix_web::Error> {
 	let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is not set");
 	let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_secret.as_bytes()).unwrap();
 
-	if let Some(cookie) = req.cookie("lcmt-login") {
-		let token_string = cookie.value();
-		let claims: Result<TokenClaims, _> = token_string.verify_with_key(&key);
+	let token_claims = req
+		.cookie("lcmt-login")
+		.map(|cookie| {
+			let token_string = cookie.value();
+			let claims: Result<TokenClaims, _> = token_string.verify_with_key(&key);
 
-		match claims {
-			Ok(value) => {
-				req.extensions_mut().insert(value);
-			}
-			Err(_) => {
-				return Err(actix_web::error::ErrorUnauthorized(
-					"Incorrect username or password",
-				));
-			}
+			claims.ok()
+		})
+		.flatten();
+
+	match token_claims {
+		Some(value) => {
+			req.extensions_mut().insert(value);
+		}
+		// token is either invalid or missing
+		None => {
+			let response = HttpResponse::Ok()
+				.insert_header(header_redirect_to("/login"))
+				.finish();
+
+			return Ok(req.into_response(response));
 		}
 	}
 
