@@ -3,7 +3,10 @@ use std::{io::Read, sync::Mutex};
 use actix_files::NamedFile;
 use actix_web::{
 	Either, HttpResponse, Responder, get,
-	http::{Method, StatusCode},
+	http::{
+		Method, StatusCode,
+		header::{self, TryIntoHeaderPair},
+	},
 	web::{Data, Html, ReqData},
 };
 use tera::{Context, Tera};
@@ -14,15 +17,11 @@ use crate::db::Database;
 pub mod ratings;
 pub mod users;
 
-#[get("/")]
-async fn get_home_page(
-	template: Data<Mutex<Tera>>,
-	db: Data<Database>,
-	req_user: Option<ReqData<TokenClaims>>,
-) -> Result<Html, actix_web::Error> {
-	home_page(template, db, req_user).await
+fn header_redirect_to(to_url: &str) -> impl TryIntoHeaderPair {
+	(header::REFRESH, format!("0; url={to_url}"))
 }
 
+#[get("/")]
 async fn home_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,

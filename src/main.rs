@@ -8,9 +8,11 @@ use db::Database;
 use env::Env;
 use mods::refresh_mods;
 use services::{
-	default_handler, favicon, get_home_page,
+	default_handler, favicon, home_page,
 	ratings::{get_rating_page, post_rating, rated_mods},
-	users::{basic_auth, create_user, create_user_page, login_page, logout, validator},
+	users::{
+		basic_auth, create_user, create_user_page, login_page, logout, logout_page, validator,
+	},
 };
 use tera::Tera;
 
@@ -62,7 +64,8 @@ async fn main() -> std::io::Result<()> {
 			.service(basic_auth)
 			.service(login_page)
 			.service(logout)
-			.service(get_home_page)
+			.service(logout_page)
+			.service(home_page)
 			.service(get_rating_page)
 			.service(post_rating)
 			.service(rated_mods)

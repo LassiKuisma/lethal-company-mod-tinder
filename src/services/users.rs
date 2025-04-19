@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use actix_files::NamedFile;
 use actix_web::{
 	CustomizeResponder, Either, HttpMessage, HttpResponse, Responder,
@@ -7,7 +5,7 @@ use actix_web::{
 	cookie::Cookie,
 	dev::{ServiceRequest, ServiceResponse},
 	get,
-	http::{StatusCode, header},
+	http::StatusCode,
 	middleware::Next,
 	post,
 	web::{Data, Form},
@@ -21,9 +19,8 @@ use jwt::{SignWithKey, VerifyWithKey};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sqlx::prelude::FromRow;
-use tera::Tera;
 
-use crate::{db::Database, services::home_page};
+use crate::{db::Database, services::header_redirect_to};
 
 #[derive(FromRow)]
 pub struct User {
@@ -148,7 +145,7 @@ async fn basic_auth(
 		Ok(Either::Left(
 			HttpResponse::Ok()
 				.cookie(cookie)
-				.append_header((header::REFRESH, "0; url=/"))
+				.append_header(header_redirect_to("/"))
 				.finish(),
 		))
 	} else {
@@ -175,18 +172,17 @@ async fn create_user_page() -> Result<impl Responder, actix_web::Error> {
 }
 
 #[get("/logout")]
-async fn logout(
-	template: Data<Mutex<Tera>>,
-	db: Data<Database>,
-) -> Result<impl Responder, actix_web::Error> {
-	// client sent login-data-cookie with this request, don't pass that to render-home-page function
-	// as we will erase that cookie with this response.
-	// TODO: should we show some kind of "logged out - click here to go back to main menu"
-	let html = home_page(template, db, None).await?;
+async fn logout_page() -> impl Responder {
+	NamedFile::open("static/logout.html")
+}
 
+#[post("/logout")]
+async fn logout() -> impl Responder {
 	let mut clear_login = Cookie::new("lcmt-login", "");
 	clear_login.make_removal();
 
-	let response = html.customize().add_cookie(&clear_login);
-	Ok(response)
+	HttpResponse::Ok()
+		.cookie(clear_login)
+		.insert_header(header_redirect_to("/"))
+		.finish()
 }
