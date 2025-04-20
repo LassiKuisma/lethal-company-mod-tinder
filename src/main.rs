@@ -8,7 +8,7 @@ use db::Database;
 use env::Env;
 use mods::refresh_mods;
 use services::{
-	default_handler, favicon, home_page,
+	default_handler, favicon, home_page, login_error_page,
 	ratings::{post_rating, rated_mods, rating_page},
 	users::{
 		basic_auth, create_user, create_user_page, login_page, logout, logout_page, validator,
@@ -62,6 +62,7 @@ async fn main() -> std::io::Result<()> {
 			.service(create_user_page)
 			.service(basic_auth)
 			.service(login_page)
+			.service(login_error_page)
 			.service(
 				web::scope("")
 					.wrap(validator_middleware)

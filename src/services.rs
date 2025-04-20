@@ -26,13 +26,17 @@ async fn home_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
 	req_user: ReqData<TokenClaims>,
-) -> Result<Html, actix_web::Error> {
+) -> Result<impl Responder, actix_web::Error> {
 	let mut ctx = Context::new();
 
-	// TODO:
 	match db.find_user_by_id(req_user.id).await {
 		Ok(Some(user)) => ctx.insert("username", &user.username),
-		Ok(None) => return Err(actix_web::error::ErrorBadRequest("Invalid login token")),
+		Ok(None) => {
+			let response = HttpResponse::BadRequest()
+				.insert_header(header_redirect_to("/login-error"))
+				.finish();
+			return Ok(Either::Left(response));
+		}
 		Err(_) => return Err(actix_web::error::ErrorInternalServerError("Database error")),
 	}
 
@@ -42,7 +46,14 @@ async fn home_page(
 		.render("index.html", &ctx)
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
 
-	Ok(Html::new(html))
+	Ok(Either::Right(Html::new(html)))
+}
+
+#[get("/login-error")]
+async fn login_error_page() -> Result<impl Responder, actix_web::Error> {
+	Ok(NamedFile::open("static/login_error.html")?
+		.customize()
+		.with_status(StatusCode::INTERNAL_SERVER_ERROR))
 }
 
 #[get("/favicon.ico")]
