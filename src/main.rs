@@ -9,7 +9,7 @@ use env::Env;
 use mods::refresh_mods;
 use services::{
 	default_handler, favicon, home_page,
-	ratings::{get_rating_page, post_rating, rated_mods},
+	ratings::{post_rating, rated_mods, rating_page},
 	users::{
 		basic_auth, create_user, create_user_page, login_page, logout, logout_page, validator,
 	},
@@ -68,7 +68,7 @@ async fn main() -> std::io::Result<()> {
 					.service(logout)
 					.service(logout_page)
 					.service(home_page)
-					.service(get_rating_page)
+					.service(rating_page)
 					.service(post_rating)
 					.service(rated_mods),
 			)
