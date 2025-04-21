@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use actix_files::NamedFile;
 use actix_web::{
 	CustomizeResponder, Either, HttpMessage, HttpResponse, Responder,
@@ -8,7 +10,7 @@ use actix_web::{
 	http::StatusCode,
 	middleware::Next,
 	post,
-	web::{Data, Form},
+	web::{Data, Form, Html},
 };
 use argon2::{
 	Argon2,
@@ -19,10 +21,11 @@ use jwt::{SignWithKey, VerifyWithKey};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sqlx::prelude::FromRow;
+use tera::{Context, Tera};
 
 use crate::{db::Database, services::header_redirect_to};
 
-#[derive(FromRow)]
+#[derive(FromRow, Debug)]
 pub struct User {
 	pub id: i32,
 	pub username: String,
@@ -81,7 +84,11 @@ struct CreateUserBody {
 }
 
 #[post("/create-user")]
-async fn create_user(db: Data<Database>, body: Form<CreateUserBody>) -> impl Responder {
+async fn create_user(
+	template: Data<Mutex<Tera>>,
+	db: Data<Database>,
+	body: Form<CreateUserBody>,
+) -> Result<impl Responder, actix_web::Error> {
 	let user = body.into_inner();
 
 	let argon2 = Argon2::default();
@@ -96,12 +103,47 @@ async fn create_user(db: Data<Database>, body: Form<CreateUserBody>) -> impl Res
 		password_hash,
 	};
 
+	let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is not set");
 	match db.insert_user(&user).await {
-		// TODO: return jwt token? (log in when creating account)
-		Ok(true) => HttpResponse::Ok().finish(),
-		Ok(false) => HttpResponse::Conflict().json("That username is already taken"),
-		Err(_) => HttpResponse::InternalServerError().json("Database error"),
+		Ok(Some(user)) => {
+			let response = HttpResponse::Ok()
+				.cookie(login_cookie(user.id, jwt_secret))
+				.insert_header(header_redirect_to("/"))
+				.finish();
+
+			return Ok(Either::Left(response));
+		}
+		Ok(None) => {
+			let response =
+				get_create_user_page(template, Some("That username is already taken")).await?;
+			return Ok(Either::Right(response));
+		}
+		Err(_) => Err(actix_web::error::ErrorInternalServerError("Database error")),
 	}
+}
+
+#[get("/create-user")]
+async fn create_user_page(template: Data<Mutex<Tera>>) -> Result<impl Responder, actix_web::Error> {
+	get_create_user_page(template, None).await
+}
+
+async fn get_create_user_page(
+	template: Data<Mutex<Tera>>,
+	error: Option<&str>,
+) -> Result<impl Responder, actix_web::Error> {
+	let mut ctx = Context::new();
+
+	if let Some(error) = error {
+		ctx.insert("error", error);
+	}
+
+	let html = template
+		.lock()
+		.unwrap()
+		.render("create_user.html", &ctx)
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
+
+	Ok(Html::new(html))
 }
 
 #[derive(Deserialize)]
@@ -116,7 +158,6 @@ async fn basic_auth(
 	body: Form<LoginCredentials>,
 ) -> Result<Either<HttpResponse, CustomizeResponder<NamedFile>>, actix_web::Error> {
 	let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is not set");
-	let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_secret.as_bytes()).unwrap();
 
 	let user = match db.find_user(&body.username).await {
 		Ok(Some(user)) => user,
@@ -143,16 +184,9 @@ async fn basic_auth(
 		.is_ok();
 
 	if is_valid {
-		let claims = TokenClaims { id: user.id };
-		let token_str = claims.sign_with_key(&key).unwrap();
-		let cookie = Cookie::build("lcmt-login", &token_str)
-			.secure(true)
-			.http_only(true)
-			.finish();
-
 		Ok(Either::Left(
 			HttpResponse::Ok()
-				.cookie(cookie)
+				.cookie(login_cookie(user.id, jwt_secret))
 				.append_header(header_redirect_to("/"))
 				.finish(),
 		))
@@ -172,13 +206,6 @@ async fn login_page() -> Result<impl Responder, actix_web::Error> {
 		.with_status(StatusCode::OK))
 }
 
-#[get("/create-user")]
-async fn create_user_page() -> Result<impl Responder, actix_web::Error> {
-	Ok(NamedFile::open("static/create_user.html")?
-		.customize()
-		.with_status(StatusCode::OK))
-}
-
 #[get("/logout")]
 async fn logout_page() -> impl Responder {
 	NamedFile::open("static/logout.html")
@@ -192,5 +219,16 @@ async fn logout() -> impl Responder {
 	HttpResponse::Ok()
 		.cookie(clear_login)
 		.insert_header(header_redirect_to("/"))
+		.finish()
+}
+
+fn login_cookie(user_id: i32, jwt_secret: String) -> Cookie<'static> {
+	let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_secret.as_bytes()).unwrap();
+	let claims = TokenClaims { id: user_id };
+	let token_str = claims.sign_with_key(&key).unwrap();
+
+	Cookie::build("lcmt-login", token_str)
+		.secure(true)
+		.http_only(true)
 		.finish()
 }

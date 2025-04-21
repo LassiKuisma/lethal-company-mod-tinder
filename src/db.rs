@@ -291,26 +291,16 @@ nsfw        =EXCLUDED.nsfw",
 		Ok(mods)
 	}
 
-	/// return Ok(true) if new user was created, Ok(false) if username is already taken
-	pub async fn insert_user(&self, user: &UserNoId) -> Result<bool, Box<dyn Error>> {
-		let result = sqlx::query(
-			"INSERT INTO users(username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING;",
+	/// return the created user on success, return None if username was already taken
+	pub async fn insert_user(&self, user: &UserNoId) -> Result<Option<User>, Box<dyn Error>> {
+		let result = sqlx::query_as(
+			"INSERT INTO users(username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id, username, password_hash;",
 		)
 		.bind(&user.username)
 		.bind(&user.password_hash)
-		.execute(&self.pool)
-		.await?;
+		.fetch_optional(&self.pool).await?;
 
-		match result.rows_affected() {
-			1 => Ok(true),
-			0 => Ok(false),
-			n => {
-				log::error!(
-					"Error inserting user into database, expected query to return at most one row, it returned {n}. User to insert: {user:?}",
-				);
-				Err("Unknown database error".into())
-			}
-		}
+		Ok(result)
 	}
 
 	pub async fn find_user(&self, name: &str) -> Result<Option<User>, Box<dyn Error>> {
@@ -765,15 +755,15 @@ mod tests {
 		};
 
 		assert!(
-			db.insert_user(&first).await.unwrap(),
+			db.insert_user(&first).await.unwrap().is_some(),
 			"Failed to insert first user"
 		);
 		assert!(
-			db.insert_user(&second).await.unwrap(),
+			db.insert_user(&second).await.unwrap().is_some(),
 			"Failed to insert second user"
 		);
 		assert!(
-			db.insert_user(&third).await.unwrap(),
+			db.insert_user(&third).await.unwrap().is_some(),
 			"Failed to insert third user"
 		);
 
@@ -800,15 +790,13 @@ mod tests {
 			password_hash: "bbbb".to_string(),
 		};
 
-		assert!(
-			db.insert_user(&first).await.unwrap(),
-			"Failed to insert user"
-		);
+		let result = db.insert_user(&first).await.unwrap().unwrap();
+		assert_eq!("Taken", result.username);
 
 		let result = db.insert_user(&second).await.unwrap();
-		assert_eq!(
-			result, false,
-			"Expected 'false' when trying to insert duplicate user"
+		assert!(
+			result.is_none(),
+			"Expected 'None' when trying to insert duplicate user"
 		);
 	}
 }
