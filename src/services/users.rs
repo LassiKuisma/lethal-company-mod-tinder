@@ -2,12 +2,11 @@ use std::sync::Mutex;
 
 use actix_files::NamedFile;
 use actix_web::{
-	CustomizeResponder, Either, HttpMessage, HttpResponse, Responder,
+	Either, HttpMessage, HttpResponse, Responder,
 	body::{BoxBody, MessageBody},
 	cookie::Cookie,
 	dev::{ServiceRequest, ServiceResponse},
 	get,
-	http::StatusCode,
 	middleware::Next,
 	post,
 	web::{Data, Form, Html},
@@ -154,26 +153,20 @@ struct LoginCredentials {
 
 #[post("/auth")]
 async fn basic_auth(
+	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
 	body: Form<LoginCredentials>,
-) -> Result<Either<HttpResponse, CustomizeResponder<NamedFile>>, actix_web::Error> {
+) -> Result<impl Responder, actix_web::Error> {
 	let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is not set");
 
 	let user = match db.find_user(&body.username).await {
 		Ok(Some(user)) => user,
 		Ok(None) => {
-			return Ok(Either::Right(
-				NamedFile::open("static/login_failed.html")?
-					.customize()
-					.with_status(StatusCode::UNAUTHORIZED),
-			));
+			let reponse = get_login_page(template, Some("Incorrect username or password")).await?;
+			return Ok(Either::Right(reponse));
 		}
 		Err(_) => {
-			return Ok(Either::Right(
-				NamedFile::open("static/error.html")?
-					.customize()
-					.with_status(StatusCode::INTERNAL_SERVER_ERROR),
-			));
+			return Err(actix_web::error::ErrorInternalServerError("Database error"));
 		}
 	};
 
@@ -191,19 +184,33 @@ async fn basic_auth(
 				.finish(),
 		))
 	} else {
-		Ok(Either::Right(
-			NamedFile::open("static/login_failed.html")?
-				.customize()
-				.with_status(StatusCode::UNAUTHORIZED),
-		))
+		let reponse = get_login_page(template, Some("Incorrect username or password")).await?;
+		Ok(Either::Right(reponse))
 	}
 }
 
 #[get("/login")]
-async fn login_page() -> Result<impl Responder, actix_web::Error> {
-	Ok(NamedFile::open("static/login.html")?
-		.customize()
-		.with_status(StatusCode::OK))
+async fn login_page(template: Data<Mutex<Tera>>) -> Result<impl Responder, actix_web::Error> {
+	get_login_page(template, None).await
+}
+
+async fn get_login_page(
+	template: Data<Mutex<Tera>>,
+	error: Option<&str>,
+) -> Result<impl Responder, actix_web::Error> {
+	let mut ctx = Context::new();
+
+	if let Some(error) = error {
+		ctx.insert("error", error);
+	}
+
+	let html = template
+		.lock()
+		.unwrap()
+		.render("login.html", &ctx)
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
+
+	Ok(Html::new(html))
 }
 
 #[get("/logout")]
