@@ -7,9 +7,13 @@
   <body>
     <h1>Create user</h1>
     <form action="/create-user" method="post">
+      {% if error %} {{ error }} {% endif %}
       <input name="username" type="text" placeholder="Username" required />
       <input name="password" type="password" placeholder="Password" required />
       <button type="submit">Create</button>
+      <br />
+      Already have an account?
+      <a href="/login">Log in</a>
     </form>
   </body>
 </html>

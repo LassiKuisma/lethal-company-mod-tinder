@@ -1,5 +1,5 @@
 use actix_web::{
-	get, post,
+	HttpResponse, Responder, get, post,
 	web::{Data, Form, Html, ReqData},
 };
 use serde::Deserialize;
@@ -10,88 +10,16 @@ use uuid::Uuid;
 use crate::{
 	db::{Database, ModQueryOptions},
 	mods::Rating,
-	services::not_logged_in,
+	services::header_redirect_to,
 };
 
 use super::users::TokenClaims;
 
 #[get("/rate")]
-async fn get_rating_page(
+async fn rating_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
-	req_user: Option<ReqData<TokenClaims>>,
-) -> Result<Html, actix_web::Error> {
-	let user = match req_user {
-		Some(user) => user.into_inner(),
-		None => {
-			return not_logged_in().await;
-		}
-	};
-
-	rating_page(template, db, user.id).await
-}
-
-#[derive(Deserialize)]
-struct RatingForm {
-	mod_id: String,
-	rating: Rating,
-}
-
-#[post("/rate")]
-async fn post_rating(
-	params: Form<RatingForm>,
-	template: Data<Mutex<Tera>>,
-	db: Data<Database>,
-	req_user: Option<ReqData<TokenClaims>>,
-) -> Result<Html, actix_web::Error> {
-	let user = match req_user {
-		Some(user) => user.into_inner(),
-		None => {
-			return not_logged_in().await;
-		}
-	};
-
-	let uuid = Uuid::parse_str(&params.mod_id)
-		.map_err(|_| actix_web::error::ErrorBadRequest("Bad mod uuid"))?;
-	db.insert_mod_rating(&uuid, &params.rating, user.id).await?;
-
-	rating_page(template, db, user.id).await
-}
-
-#[get("/likes")]
-async fn rated_mods(
-	template: Data<Mutex<Tera>>,
-	db: Data<Database>,
-	req_user: Option<ReqData<TokenClaims>>,
-) -> Result<Html, actix_web::Error> {
-	let user = match req_user {
-		Some(user) => user.into_inner(),
-		None => {
-			return not_logged_in().await;
-		}
-	};
-
-	let mods = db
-		.get_rated_mods(&Rating::Like, 100, user.id)
-		.await
-		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
-
-	let mut ctx = Context::new();
-	ctx.insert("mods", &mods);
-
-	let html = template
-		.lock()
-		.unwrap()
-		.render("rated_mods.html", &ctx)
-		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
-
-	Ok(Html::new(html))
-}
-
-pub async fn rating_page(
-	template: Data<Mutex<Tera>>,
-	db: Data<Database>,
-	user_id: i32,
+	req_user: ReqData<TokenClaims>,
 ) -> Result<Html, actix_web::Error> {
 	let mut ctx = Context::new();
 
@@ -103,7 +31,7 @@ pub async fn rating_page(
 	};
 
 	let mods = db
-		.get_mods(&options, user_id)
+		.get_mods(&options, req_user.id)
 		.await
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
@@ -122,6 +50,54 @@ pub async fn rating_page(
 		.lock()
 		.unwrap()
 		.render("rating.html", &ctx)
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
+
+	Ok(Html::new(html))
+}
+
+#[derive(Deserialize)]
+struct RatingForm {
+	mod_id: String,
+	rating: Rating,
+}
+
+#[post("/rate")]
+async fn post_rating(
+	params: Form<RatingForm>,
+	db: Data<Database>,
+	req_user: ReqData<TokenClaims>,
+) -> Result<impl Responder, actix_web::Error> {
+	let user_id = req_user.id;
+
+	let uuid = Uuid::parse_str(&params.mod_id)
+		.map_err(|_| actix_web::error::ErrorBadRequest("Bad mod uuid"))?;
+	db.insert_mod_rating(&uuid, &params.rating, user_id).await?;
+
+	Ok(HttpResponse::Created()
+		.insert_header(header_redirect_to("/rate"))
+		.finish())
+}
+
+#[get("/likes")]
+async fn rated_mods(
+	template: Data<Mutex<Tera>>,
+	db: Data<Database>,
+	req_user: ReqData<TokenClaims>,
+) -> Result<Html, actix_web::Error> {
+	let user_id = req_user.id;
+
+	let mods = db
+		.get_rated_mods(&Rating::Like, 100, user_id)
+		.await
+		.map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
+
+	let mut ctx = Context::new();
+	ctx.insert("mods", &mods);
+
+	let html = template
+		.lock()
+		.unwrap()
+		.render("rated_mods.html", &ctx)
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Template error"))?;
 
 	Ok(Html::new(html))

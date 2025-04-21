@@ -8,9 +8,11 @@ use db::Database;
 use env::Env;
 use mods::refresh_mods;
 use services::{
-	default_handler, favicon, get_home_page,
-	ratings::{get_rating_page, post_rating, rated_mods},
-	users::{basic_auth, create_user, create_user_page, login_page, logout, validator},
+	default_handler, favicon, home_page, login_error_page,
+	ratings::{post_rating, rated_mods, rating_page},
+	users::{
+		basic_auth, create_user, create_user_page, login_page, logout, logout_page, validator,
+	},
 };
 use tera::Tera;
 
@@ -53,7 +55,6 @@ async fn main() -> std::io::Result<()> {
 
 		App::new()
 			.wrap(middleware::Logger::default())
-			.wrap(validator_middleware)
 			.app_data(Data::new(db.clone()))
 			.app_data(tera.clone())
 			.service(favicon)
@@ -61,11 +62,17 @@ async fn main() -> std::io::Result<()> {
 			.service(create_user_page)
 			.service(basic_auth)
 			.service(login_page)
-			.service(logout)
-			.service(get_home_page)
-			.service(get_rating_page)
-			.service(post_rating)
-			.service(rated_mods)
+			.service(login_error_page)
+			.service(
+				web::scope("")
+					.wrap(validator_middleware)
+					.service(logout)
+					.service(logout_page)
+					.service(home_page)
+					.service(rating_page)
+					.service(post_rating)
+					.service(rated_mods),
+			)
 			.default_service(web::to(default_handler))
 	})
 	.bind(("0.0.0.0", port))?
