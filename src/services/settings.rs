@@ -83,7 +83,9 @@ pub async fn save_settings(settings: QsForm<Settings>) -> Result<impl Responder,
 	let settings_json = serde_json::to_string(&settings.into_inner())
 		.map_err(|_| actix_web::error::ErrorInternalServerError("Unknown error"))?;
 
-	let cookie = Cookie::build(SETTINGS_COOKIE, settings_json).finish();
+	let cookie = Cookie::build(SETTINGS_COOKIE, settings_json)
+		.permanent()
+		.finish();
 
 	let response = HttpResponse::Ok()
 		.insert_header(header_redirect_to("/"))
