@@ -42,8 +42,11 @@ impl Database {
 		options: &ModQueryOptions,
 		user_id: i32,
 	) -> Result<Vec<Mod>, Box<dyn Error>> {
-		let mut builder = QueryBuilder::new(
-			"SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id FROM mods ",
+		let mut builder = QueryBuilder::new("
+			SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id, array_remove(array_agg(categories.name), NULL) categories
+			FROM mods
+			LEFT JOIN mod_category ON mod_category.mod_id = mods.id
+			LEFT JOIN categories ON categories.id = mod_category.category_id ",
 		);
 		builder.push("WHERE mods.id NOT IN (SELECT mod_id FROM ratings WHERE ratings.user_id =");
 		builder.push_bind(user_id);
@@ -74,6 +77,7 @@ impl Database {
 		}
 
 		let query = builder
+			.push("GROUP BY mods.id ")
 			.push("ORDER BY mods.updated_date DESC ")
 			.push("LIMIT ")
 			.push_bind(options.limit)
@@ -274,11 +278,14 @@ nsfw        =EXCLUDED.nsfw",
 		limit: i16,
 		user_id: i32,
 	) -> Result<Vec<Mod>, Box<dyn Error>> {
-		let sql = "SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id
+		let sql = "SELECT mods.name, mods.owner, mods.description, mods.icon_url, mods.package_url, mods.id, array_remove(array_agg(categories.name), NULL) categories
 			FROM mods
 			JOIN ratings ON mods.id = ratings.mod_id
+			LEFT JOIN mod_category ON mod_category.mod_id = mods.id
+			LEFT JOIN categories ON categories.id = mod_category.category_id
 			WHERE ratings.rating = $1
 			AND ratings.user_id = $2
+			GROUP BY mods.id
 			LIMIT $3;";
 
 		let mods = sqlx::query_as(sql)
@@ -609,6 +616,11 @@ mod tests {
 			icon_url: "icon-1 url".to_string(),
 			package_url: "package-1 url".to_string(),
 			id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+			categories: vec![
+				"first".to_string(),
+				"second".to_string(),
+				"third".to_string(),
+			],
 		};
 		let date_1 = Date::parse("2025-03-22T19:59:59.012345Z", &Iso8601::DEFAULT).unwrap();
 
@@ -619,6 +631,7 @@ mod tests {
 			icon_url: "icon-2 url".to_string(),
 			package_url: "package-2 url".to_string(),
 			id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+			categories: Default::default(),
 		};
 		let date_2 = Date::parse("2025-03-22T22:22:22.222222Z", &Iso8601::DEFAULT).unwrap();
 
@@ -672,6 +685,10 @@ mod tests {
 		let mut expected = vec![m1, m2];
 		expected.sort_by(|a, b| a.name.cmp(&b.name));
 
+		// categories might be returned in random order and FromRow doesn't support HashSet
+		// -> sort them to prevent tests from failing randomly
+		result.iter_mut().for_each(|modd| modd.categories.sort());
+		expected.iter_mut().for_each(|modd| modd.categories.sort());
 		assert_eq!(expected, result);
 	}
 

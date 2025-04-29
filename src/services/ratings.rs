@@ -65,6 +65,7 @@ async fn rating_page(
 	ctx.insert("description", &modd.description);
 	ctx.insert("package_url", &modd.package_url);
 	ctx.insert("mod_id", &modd.id.to_string());
+	ctx.insert("categories", &modd.categories.join(", "));
 
 	let html = template
 		.lock()
