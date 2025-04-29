@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Lethal Company Mod Tinder</title>
+  </head>
+  <body>
+    <a href="/">Back to main page</a>
+    <br />
+    <h1>Settings</h1>
+    <form action="/save-settings" method="post">
+      <button type="submit">Save settings</button>
+      <br />
+      <input
+        type="checkbox"
+        id="checkbox_nsfw"
+        name="include_nsfw"
+        value="true"
+        {% if nsfw_checked %} checked {% endif %}
+      />
+      <label for="checkbox_nsfw">Include NSFW mods</label>
+      <br />
+      <input
+        type="checkbox"
+        id="checkbox_deprecated"
+        name="include_deprecated"
+        value="true"
+        {% if deprecated_checked %} checked {% endif %}
+      />
+      <label for="checkbox_deprecated">Include deprecated mods</label>
+      <p>Exclude categories:</p>
+      <ul>
+        {% for category in categories %} {% set cb_id = "category_" ~
+        category.id %}
+        <li>
+          <input
+            type="checkbox"
+            id="{{cb_id}}"
+            name="excluded_category[]"
+            value="{{category.name}}"
+            {% if category.checked %} checked {% endif %}
+          />
+          <label for="{{cb_id}}">{{ category.name }}</label>
+        </li>
+        {% endfor %}
+      </ul>
+    </form>
+  </body>
+</html>

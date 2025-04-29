@@ -7,9 +7,11 @@ use actix_web::{
 use db::Database;
 use env::Env;
 use mods::refresh_mods;
+use serde_qs::actix::QsQueryConfig;
 use services::{
 	default_handler, favicon, home_page, login_error_page,
 	ratings::{post_rating, rated_mods, rating_page},
+	settings::{save_settings, settings_page},
 	users::{
 		basic_auth, create_user, create_user_page, login_page, logout, logout_page, validator,
 	},
@@ -53,10 +55,13 @@ async fn main() -> std::io::Result<()> {
 	HttpServer::new(move || {
 		let validator_middleware = middleware::from_fn(validator);
 
+		let qs_config = QsQueryConfig::default().qs_config(serde_qs::Config::new(5, false));
+
 		App::new()
 			.wrap(middleware::Logger::default())
 			.app_data(Data::new(db.clone()))
 			.app_data(tera.clone())
+			.app_data(qs_config)
 			.service(favicon)
 			.service(create_user)
 			.service(create_user_page)
@@ -71,7 +76,9 @@ async fn main() -> std::io::Result<()> {
 					.service(home_page)
 					.service(rating_page)
 					.service(post_rating)
-					.service(rated_mods),
+					.service(rated_mods)
+					.service(settings_page)
+					.service(save_settings),
 			)
 			.default_service(web::to(default_handler))
 	})

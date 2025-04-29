@@ -23,7 +23,7 @@ const CACHE_FILE: &str = "data/mods_cache.json";
 const THUNDERSTORE_API_URL: &str = "https://thunderstore.io/c/lethal-company/api/v1/package/";
 
 #[allow(dead_code)]
-#[derive(Debug, Hash, PartialEq, Serialize, Eq, FromRow)]
+#[derive(Debug, PartialEq, Serialize, Eq, FromRow)]
 pub struct Mod {
 	pub name: String,
 	pub owner: String,
@@ -31,9 +31,10 @@ pub struct Mod {
 	pub icon_url: String,
 	pub package_url: String,
 	pub id: Uuid,
+	pub categories: Vec<String>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, FromRow)]
+#[derive(Debug, PartialEq, Eq, Hash, FromRow, Serialize)]
 pub struct Category {
 	pub name: String,
 	pub id: i32,
