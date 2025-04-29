@@ -25,13 +25,18 @@ async fn rating_page(
 	req_user: ReqData<TokenClaims>,
 	request: HttpRequest,
 ) -> Result<Html, actix_web::Error> {
+	let mut ctx = Context::new();
+
 	let settings = request
 		.cookie(SETTINGS_COOKIE)
 		.map(|cookie| {
 			serde_json::from_str::<Settings>(cookie.value())
 				.inspect_err(|error| {
-					// TODO: respond with "there was a problem - please re-save your settings"
-					log::error!("Error deserializing settings cookie: {error}")
+					log::error!("Error deserializing settings cookie: {error}");
+					ctx.insert(
+						"settings_error",
+						"There was an error loading your settings, please visit the settings page to refresh them.",
+					);
 				})
 				.ok()
 		})
@@ -54,7 +59,6 @@ async fn rating_page(
 		.first()
 		.ok_or_else(|| actix_web::error::ErrorInternalServerError("No mods found"))?;
 
-	let mut ctx = Context::new();
 	ctx.insert("name", &modd.name);
 	ctx.insert("owner", &modd.owner);
 	ctx.insert("icon_url", &modd.icon_url);

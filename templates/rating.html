@@ -5,6 +5,9 @@
     <title>Lethal Company Mod Tinder</title>
   </head>
   <body>
+    {% if settings_error %}
+    <p>{{ settings_error }}</p>
+    {% endif %}
     <a href="/">Back to main page</a>
     <br />
     <a href="settings">Settings</a>
