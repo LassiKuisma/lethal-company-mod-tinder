@@ -33,7 +33,7 @@ pub struct Mod {
 	pub id: Uuid,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, FromRow)]
+#[derive(Debug, PartialEq, Eq, Hash, FromRow, Serialize)]
 pub struct Category {
 	pub name: String,
 	pub id: i32,

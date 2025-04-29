@@ -1,5 +1,5 @@
 use actix_web::{
-	HttpResponse, Responder, get, post,
+	HttpRequest, HttpResponse, Responder, get, post,
 	web::{Data, Form, Html, ReqData},
 };
 use serde::Deserialize;
@@ -10,7 +10,10 @@ use uuid::Uuid;
 use crate::{
 	db::{Database, ModQueryOptions},
 	mods::Rating,
-	services::header_redirect_to,
+	services::{
+		header_redirect_to,
+		settings::{SETTINGS_COOKIE, Settings},
+	},
 };
 
 use super::users::TokenClaims;
@@ -20,14 +23,26 @@ async fn rating_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
 	req_user: ReqData<TokenClaims>,
+	request: HttpRequest,
 ) -> Result<Html, actix_web::Error> {
-	let mut ctx = Context::new();
+	let settings = request
+		.cookie(SETTINGS_COOKIE)
+		.map(|cookie| {
+			serde_json::from_str::<Settings>(cookie.value())
+				.inspect_err(|error| {
+					// TODO: respond with "there was a problem - please re-save your settings"
+					log::error!("Error deserializing settings cookie: {error}")
+				})
+				.ok()
+		})
+		.flatten()
+		.unwrap_or_default();
 
 	let options = ModQueryOptions {
-		ignored_categories: Default::default(),
 		limit: 1,
-		include_deprecated: false,
-		include_nsfw: false,
+		ignored_categories: settings.excluded_category,
+		include_deprecated: settings.include_deprecated,
+		include_nsfw: settings.include_nsfw,
 	};
 
 	let mods = db
@@ -39,6 +54,7 @@ async fn rating_page(
 		.first()
 		.ok_or_else(|| actix_web::error::ErrorInternalServerError("No mods found"))?;
 
+	let mut ctx = Context::new();
 	ctx.insert("name", &modd.name);
 	ctx.insert("owner", &modd.owner);
 	ctx.insert("icon_url", &modd.icon_url);
