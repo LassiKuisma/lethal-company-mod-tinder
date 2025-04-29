@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Mutex};
 
 use actix_web::{
-	HttpResponse, Responder,
+	HttpRequest, HttpResponse, Responder,
 	cookie::Cookie,
 	get, post,
 	web::{Data, Html},
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_qs::actix::QsForm;
 use tera::{Context, Tera};
 
-use crate::{db::Database, services::header_redirect_to};
+use crate::{db::Database, mods::Category, services::header_redirect_to};
 
 pub const SETTINGS_COOKIE: &'static str = "lcmt-settings";
 
@@ -24,16 +24,50 @@ pub struct Settings {
 	pub include_deprecated: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct CategoryCheckbox {
+	name: String,
+	id: i32,
+	checked: bool,
+}
+
+impl CategoryCheckbox {
+	fn new(category: Category, checked: bool) -> Self {
+		Self {
+			name: category.name,
+			id: category.id,
+			checked,
+		}
+	}
+}
+
 #[get("/settings")]
 pub async fn settings_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
+	request: HttpRequest,
 ) -> Result<impl Responder, actix_web::Error> {
+	let settings = request
+		.cookie(SETTINGS_COOKIE)
+		.map(|cookie| serde_json::from_str::<Settings>(cookie.value()).ok())
+		.flatten()
+		.unwrap_or_default();
+
 	let mut ctx = Context::new();
 
-	let categories = db.get_categories().await?;
+	let categories = db
+		.get_categories()
+		.await?
+		.into_iter()
+		.map(|c| {
+			let checked = settings.excluded_category.contains(&c.name);
+			CategoryCheckbox::new(c, checked)
+		})
+		.collect::<Vec<_>>();
 
 	ctx.insert("categories", &categories);
+	ctx.insert("nsfw_checked", &settings.include_nsfw);
+	ctx.insert("deprecated_checked", &settings.include_deprecated);
 
 	let html = template
 		.lock()

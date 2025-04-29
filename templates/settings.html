@@ -16,6 +16,7 @@
         id="checkbox_nsfw"
         name="include_nsfw"
         value="true"
+        {% if nsfw_checked %} checked {% endif %}
       />
       <label for="checkbox_nsfw">Include NSFW mods</label>
       <br />
@@ -24,6 +25,7 @@
         id="checkbox_deprecated"
         name="include_deprecated"
         value="true"
+        {% if deprecated_checked %} checked {% endif %}
       />
       <label for="checkbox_deprecated">Include deprecated mods</label>
       <p>Exclude categories:</p>
@@ -36,6 +38,7 @@
             id="{{cb_id}}"
             name="excluded_category[]"
             value="{{category.name}}"
+            {% if category.checked %} checked {% endif %}
           />
           <label for="{{cb_id}}">{{ category.name }}</label>
         </li>
