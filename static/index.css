@@ -10,3 +10,7 @@
   gap: 5px;
   max-width: 300px;
 }
+
+ul {
+  list-style-type: none;
+}
