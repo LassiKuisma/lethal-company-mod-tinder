@@ -7,9 +7,9 @@
   </head>
   <body>
     <div id="root">
-      <h1>Login</h1>
       {% if error %} {{ error }} {% endif %}
-      <form action="/auth" method="post" class="login-container">
+      <form action="/auth" method="post" class="vertical-container">
+        <h1>Login</h1>
         <input name="username" type="text" placeholder="Username" />
         <input name="password" type="password" placeholder="Password" />
         <button type="submit">Login</button>
