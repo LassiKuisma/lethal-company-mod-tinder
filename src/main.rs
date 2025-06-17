@@ -9,7 +9,7 @@ use env::Env;
 use mods::refresh_mods;
 use serde_qs::actix::QsQueryConfig;
 use services::{
-	default_handler, favicon, home_page, login_error_page,
+	css, default_handler, favicon, home_page, login_error_page,
 	ratings::{post_rating, rated_mods, rating_page},
 	settings::{save_settings, settings_page},
 	users::{
@@ -68,6 +68,7 @@ async fn main() -> std::io::Result<()> {
 			.service(basic_auth)
 			.service(login_page)
 			.service(login_error_page)
+			.service(css)
 			.service(
 				web::scope("")
 					.wrap(validator_middleware)

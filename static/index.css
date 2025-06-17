@@ -1,0 +1,12 @@
+#root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.login-container {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 300px;
+}
