@@ -8,9 +8,22 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  max-width: 300px;
+  align-items: center;
 }
 
 ul {
   list-style-type: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  text-align: center;
+}
+
+* + * {
+  margin-top: 0.5em;
 }

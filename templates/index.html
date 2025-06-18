@@ -2,6 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Lethal Company Mod Tinder</title>
     <link rel="stylesheet" href="index.css" />
   </head>
@@ -9,20 +10,14 @@
     <div id="root">
       {% if username %}
       <h1>Welcome {{ username }} to Lethal Company mod tinder</h1>
-      <br />
       <a href="settings">Settings</a>
-      <br />
       <a href="rate">Start rating mods</a>
-      <br />
       <a href="likes">View your liked mods</a>
-      <br />
       <a href="logout">Logout</a>
       {% else %}
       <h1>Welcome to Lethal Company mod tinder!</h1>
       <p1>Please login or create user first</p1>
-      <br />
       <a href="create-user">Create user</a>
-      <br />
       <a href="login">Login</a>
       {% endif %}
     </div>
