@@ -8,43 +8,46 @@
   </head>
   <body>
     <div id="root">
-      <a href="/">Back to main page</a>
-      <br />
-      <h1>Settings</h1>
-      <form action="/save-settings" method="post">
-        <button type="submit">Save settings</button>
-        <br />
-        <input
-          type="checkbox"
-          id="checkbox_nsfw"
-          name="include_nsfw"
-          value="true"
-          {%
-          if
-          nsfw_checked
-          %}
-          checked
-          {%
-          endif
-          %}
-        />
-        <label for="checkbox_nsfw">Include NSFW mods</label>
-        <br />
-        <input
-          type="checkbox"
-          id="checkbox_deprecated"
-          name="include_deprecated"
-          value="true"
-          {%
-          if
-          deprecated_checked
-          %}
-          checked
-          {%
-          endif
-          %}
-        />
-        <label for="checkbox_deprecated">Include deprecated mods</label>
+      <form action="/save-settings" method="post" class="vertical-container">
+        <div class="sticky-header">
+          <a href="/">Back to main page</a>
+          <button type="submit">Save settings</button>
+        </div>
+        <h1>Settings</h1>
+        <div>
+          <input
+            type="checkbox"
+            id="checkbox_nsfw"
+            name="include_nsfw"
+            value="true"
+            {%
+            if
+            nsfw_checked
+            %}
+            checked
+            {%
+            endif
+            %}
+          />
+          <label for="checkbox_nsfw">Include NSFW mods</label>
+        </div>
+        <div>
+          <input
+            type="checkbox"
+            id="checkbox_deprecated"
+            name="include_deprecated"
+            value="true"
+            {%
+            if
+            deprecated_checked
+            %}
+            checked
+            {%
+            endif
+            %}
+          />
+          <label for="checkbox_deprecated">Include deprecated mods</label>
+        </div>
         <p>Exclude categories:</p>
         <ul>
           {% for category in categories %} {% set cb_id = "category_" ~
