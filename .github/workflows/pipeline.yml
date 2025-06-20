@@ -34,7 +34,8 @@ jobs:
       - run: cp build/release/lethal-company-mod-tinder release/
       - run: cp -r templates/ release/
       - run: cp -r static/ release/
-      - run: zip -r release.zip release/
+      - run: zip -r ../release.zip .
+        working-directory: ./release
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
