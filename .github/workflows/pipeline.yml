@@ -41,3 +41,29 @@ jobs:
         with:
           tag_name: latest
           files: latest.zip
+  deploy:
+    name: Reinstall Pterodactyl server
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: reinstall
+        run: |
+          curl "${{secrets.panel_url}}/api/client/servers/${{secrets.server_id}}/settings/reinstall" \
+          -H 'Accept: application/json' \
+          -H 'Content-Type: application/json' \
+          -H 'Authorization: Bearer ${{ secrets.pterodactyl_api_key }}' \
+          -X POST
+      - name: restart server
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: |
+            curl "${{secrets.panel_url}}/api/client/servers/${{secrets.server_id}}/power" \
+            --fail \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            -H 'Authorization: Bearer ${{ secrets.pterodactyl_api_key }}' \
+            -X POST \
+            -d '{"signal":"start"}'
