@@ -2,17 +2,21 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Login</title>
+    <link rel="stylesheet" href="index.css" />
   </head>
   <body>
-    <h1>Login</h1>
-    {% if error %} {{ error }} {% endif %}
-    <form action="/auth" method="post">
-      <input name="username" type="text" placeholder="Username" />
-      <input name="password" type="password" placeholder="Password" />
-      <button type="submit">Login</button>
-    </form>
-    <h2>Don't have an user yet?</h2>
-    <a href="create-user">Create user</a>
+    <div id="root">
+      {% if error %} {{ error }} {% endif %}
+      <form action="/auth" method="post" class="vertical-container">
+        <h1>Login</h1>
+        <input name="username" type="text" placeholder="Username" />
+        <input name="password" type="password" placeholder="Password" />
+        <button type="submit">Login</button>
+      </form>
+      <h2>Don't have an user yet?</h2>
+      <a href="create-user">Create user</a>
+    </div>
   </body>
 </html>

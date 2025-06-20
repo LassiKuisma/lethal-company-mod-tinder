@@ -62,6 +62,11 @@ pub async fn favicon() -> actix_web::Result<impl Responder> {
 	Ok(NamedFile::open("static/favicon.ico")?)
 }
 
+#[get("/index.css")]
+pub async fn css() -> actix_web::Result<impl Responder> {
+	Ok(NamedFile::open("static/index.css")?)
+}
+
 pub async fn default_handler(req_method: Method) -> actix_web::Result<impl Responder> {
 	match req_method {
 		Method::GET => {

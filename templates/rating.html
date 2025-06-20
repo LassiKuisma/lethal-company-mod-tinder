@@ -3,28 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <title>Lethal Company Mod Tinder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="index.css" />
   </head>
   <body>
-    {% if settings_error %}
-    <p>{{ settings_error }}</p>
-    {% endif %}
-    <a href="/">Back to main page</a>
-    <br />
-    <a href="settings">Settings</a>
-    <br />
-    <a href="likes">Liked mods</a>
-    <h1>{{ name }}</h1>
-    <h2>By {{ owner }}</h2>
-    <img src="{{ icon_url }}" alt="mod icon" />
-    <p>{{ description }}</p>
-    <a href="{{ package_url }}">Mod page</a>
-    <p>Categories: {{ categories }}</p>
-    <form action="/rate" method="post">
-      <input name="mod_id" value="{{ mod_id }}" type="hidden" />
-      <button type="submit" name="rating" value="Like">Looks good</button>
-      <button type="submit" name="rating" value="Dislike">
-        Not interested
-      </button>
-    </form>
+    <div id="root">
+      {% if settings_error %}
+      <p>{{ settings_error }}</p>
+      {% endif %}
+      <a href="/">Back to main page</a>
+      <a href="settings">Settings</a>
+      <a href="likes">Liked mods</a>
+      <h1>{{ name }}</h1>
+      <h2>By {{ owner }}</h2>
+      <img src="{{ icon_url }}" alt="mod icon" />
+      <p>{{ description }}</p>
+      <a href="{{ package_url }}">Mod page</a>
+      <p>Categories: {{ categories }}</p>
+      <form action="/rate" method="post" class="vertical-container">
+        <input name="mod_id" value="{{ mod_id }}" type="hidden" />
+        <button type="submit" name="rating" value="Like">Looks good</button>
+        <button type="submit" name="rating" value="Dislike">
+          Not interested
+        </button>
+      </form>
+    </div>
   </body>
 </html>
