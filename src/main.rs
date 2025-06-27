@@ -9,7 +9,9 @@ use env::Env;
 use mods::refresh_mods;
 use serde_qs::actix::QsQueryConfig;
 use services::{
-	css, default_handler, favicon, home_page, login_error_page,
+	css, default_handler, favicon, home_page,
+	import_mods::{ImportStatus, import_mods, import_mods_page, privilege_validator},
+	login_error_page,
 	ratings::{post_rating, rated_mods, rating_page},
 	settings::{save_settings, settings_page},
 	users::{
@@ -49,11 +51,24 @@ async fn main() -> std::io::Result<()> {
 		)
 	};
 
+	let import_status = Data::new(Mutex::new(ImportStatus::default()));
+
+	let status_clone = import_status.clone();
+	actix_rt::spawn(async move {
+		let mut interval = actix_rt::time::interval(Duration::from_secs(20));
+		loop {
+			interval.tick().await;
+			let status = status_clone.lock().unwrap();
+			log::info!("running scheduler... import status: {:?}", status);
+		}
+	});
+
 	let port = env.port;
 	log::info!("Starting server on port {port}");
 
 	HttpServer::new(move || {
 		let validator_middleware = middleware::from_fn(validator);
+		let privilege_validator = middleware::from_fn(privilege_validator);
 
 		let qs_config = QsQueryConfig::default().qs_config(serde_qs::Config::new(5, false));
 
@@ -62,6 +77,7 @@ async fn main() -> std::io::Result<()> {
 			.app_data(Data::new(db.clone()))
 			.app_data(tera.clone())
 			.app_data(qs_config)
+			.app_data(import_status.clone())
 			.service(favicon)
 			.service(create_user)
 			.service(create_user_page)
@@ -72,14 +88,23 @@ async fn main() -> std::io::Result<()> {
 			.service(
 				web::scope("")
 					.wrap(validator_middleware)
-					.service(logout)
-					.service(logout_page)
-					.service(home_page)
-					.service(rating_page)
-					.service(post_rating)
-					.service(rated_mods)
-					.service(settings_page)
-					.service(save_settings),
+					.service(
+						web::scope("/import-mods")
+							.wrap(privilege_validator)
+							.route("", web::get().to(import_mods_page))
+							.route("", web::post().to(import_mods)),
+					)
+					.service(
+						web::scope("")
+							.service(logout)
+							.service(logout_page)
+							.service(home_page)
+							.service(rating_page)
+							.service(post_rating)
+							.service(rated_mods)
+							.service(settings_page)
+							.service(save_settings),
+					),
 			)
 			.default_service(web::to(default_handler))
 	})

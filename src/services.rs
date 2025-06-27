@@ -14,9 +14,10 @@ use users::TokenClaims;
 
 use crate::db::Database;
 
+pub mod import_mods;
 pub mod ratings;
-pub mod users;
 pub mod settings;
+pub mod users;
 
 fn header_redirect_to(to_url: &str) -> impl TryIntoHeaderPair {
 	(header::REFRESH, format!("0; url={to_url}"))
