@@ -12,18 +12,18 @@ use actix_web::{
 use tera::{Context, Tera};
 use users::TokenClaims;
 
-use crate::db::Database;
+use crate::{db::Database, middlewares::TokenValidator};
 
 pub mod import_mods;
 pub mod ratings;
 pub mod settings;
 pub mod users;
 
-fn header_redirect_to(to_url: &str) -> impl TryIntoHeaderPair {
+pub fn header_redirect_to(to_url: &str) -> impl TryIntoHeaderPair {
 	(header::REFRESH, format!("0; url={to_url}"))
 }
 
-#[get("/")]
+#[get("/", wrap = "TokenValidator")]
 async fn home_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,

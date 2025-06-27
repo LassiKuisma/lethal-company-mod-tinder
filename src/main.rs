@@ -10,18 +10,17 @@ use mods::refresh_mods;
 use serde_qs::actix::QsQueryConfig;
 use services::{
 	css, default_handler, favicon, home_page,
-	import_mods::{ImportStatus, import_mods, import_mods_page, privilege_validator},
+	import_mods::{ImportStatus, import_mods, import_mods_page},
 	login_error_page,
 	ratings::{post_rating, rated_mods, rating_page},
 	settings::{save_settings, settings_page},
-	users::{
-		basic_auth, create_user, create_user_page, login_page, logout, logout_page, validator,
-	},
+	users::{basic_auth, create_user, create_user_page, login_page, logout, logout_page},
 };
 use tera::Tera;
 
 mod db;
 mod env;
+mod middlewares;
 mod mods;
 mod services;
 
@@ -67,9 +66,6 @@ async fn main() -> std::io::Result<()> {
 	log::info!("Starting server on port {port}");
 
 	HttpServer::new(move || {
-		let validator_middleware = middleware::from_fn(validator);
-		let privilege_validator = middleware::from_fn(privilege_validator);
-
 		let qs_config = QsQueryConfig::default().qs_config(serde_qs::Config::new(5, false));
 
 		App::new()
@@ -85,27 +81,16 @@ async fn main() -> std::io::Result<()> {
 			.service(login_page)
 			.service(login_error_page)
 			.service(css)
-			.service(
-				web::scope("")
-					.wrap(validator_middleware)
-					.service(
-						web::scope("/import-mods")
-							.wrap(privilege_validator)
-							.route("", web::get().to(import_mods_page))
-							.route("", web::post().to(import_mods)),
-					)
-					.service(
-						web::scope("")
-							.service(logout)
-							.service(logout_page)
-							.service(home_page)
-							.service(rating_page)
-							.service(post_rating)
-							.service(rated_mods)
-							.service(settings_page)
-							.service(save_settings),
-					),
-			)
+			.service(import_mods_page)
+			.service(import_mods)
+			.service(logout)
+			.service(logout_page)
+			.service(home_page)
+			.service(rating_page)
+			.service(post_rating)
+			.service(rated_mods)
+			.service(settings_page)
+			.service(save_settings)
 			.default_service(web::to(default_handler))
 	})
 	.bind(("0.0.0.0", port))?

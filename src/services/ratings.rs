@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::{
 	db::{Database, ModQueryOptions},
+	middlewares::TokenValidator,
 	mods::Rating,
 	services::{
 		header_redirect_to,
@@ -18,7 +19,7 @@ use crate::{
 
 use super::users::TokenClaims;
 
-#[get("/rate")]
+#[get("/rate", wrap = "TokenValidator")]
 async fn rating_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
@@ -82,7 +83,7 @@ struct RatingForm {
 	rating: Rating,
 }
 
-#[post("/rate")]
+#[post("/rate", wrap = "TokenValidator")]
 async fn post_rating(
 	params: Form<RatingForm>,
 	db: Data<Database>,
@@ -99,7 +100,7 @@ async fn post_rating(
 		.finish())
 }
 
-#[get("/likes")]
+#[get("/likes", wrap = "TokenValidator")]
 async fn rated_mods(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,

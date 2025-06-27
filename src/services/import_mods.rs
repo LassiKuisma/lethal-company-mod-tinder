@@ -1,15 +1,9 @@
 use std::sync::Mutex;
 
 use actix_files::NamedFile;
-use actix_web::{
-	HttpMessage, Responder,
-	body::{BoxBody, MessageBody},
-	dev::{ServiceRequest, ServiceResponse},
-	middleware::Next,
-	web::Data,
-};
+use actix_web::{Responder, get, post, web::Data};
 
-use crate::{db::Database, services::users::TokenClaims};
+use crate::middlewares::{PrivilegeValidator, TokenValidator};
 
 #[derive(Debug, Default, Clone)]
 pub struct ImportStatus {
@@ -17,36 +11,7 @@ pub struct ImportStatus {
 	pub import_in_progress: bool,
 }
 
-pub async fn privilege_validator(
-	req: ServiceRequest,
-	next: Next<BoxBody>,
-) -> Result<ServiceResponse<impl MessageBody>, actix_web::Error> {
-	let db = req.app_data::<Data<Database>>().ok_or_else(|| {
-		actix_web::error::ErrorInternalServerError("Server error (can't find db)")
-	})?;
-
-	let user = {
-		let ext = req.extensions();
-		let token_claims = ext.get::<TokenClaims>().ok_or_else(|| {
-			actix_web::error::ErrorInternalServerError("Server error (can't find token)")
-		})?;
-
-		let user = db
-			.find_user_by_id(token_claims.id)
-			.await?
-			.ok_or_else(|| actix_web::error::ErrorUnauthorized("Unauthorized"))?;
-		user
-	};
-
-	// TODO:
-	if user.username != "admin" {
-		let err = actix_web::error::ErrorUnauthorized("You don't have permission to use this");
-		return Err(err);
-	}
-
-	next.call(req).await
-}
-
+#[get("/import-mods", wrap = "PrivilegeValidator", wrap = "TokenValidator")]
 pub async fn import_mods_page(import_status: Data<Mutex<ImportStatus>>) -> impl Responder {
 	let import_status = import_status.lock().unwrap();
 	let already_requested = import_status.import_requested;
@@ -59,6 +24,7 @@ pub async fn import_mods_page(import_status: Data<Mutex<ImportStatus>>) -> impl 
 	NamedFile::open("static/import_mods.html")
 }
 
+#[post("/import-mods", wrap = "PrivilegeValidator", wrap = "TokenValidator")]
 pub async fn import_mods(import_status: Data<Mutex<ImportStatus>>) -> impl Responder {
 	log::info!("Mod reimport requested");
 	import_status.lock().unwrap().import_requested = true;
