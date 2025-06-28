@@ -301,7 +301,7 @@ nsfw        =EXCLUDED.nsfw",
 	/// return the created user on success, return None if username was already taken
 	pub async fn insert_user(&self, user: &UserNoId) -> Result<Option<User>, Box<dyn Error>> {
 		let result = sqlx::query_as(
-			"INSERT INTO users(username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id, username, password_hash;",
+			"INSERT INTO users(username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id, username, password_hash, has_import_privileges;",
 		)
 		.bind(&user.username)
 		.bind(&user.password_hash)
@@ -311,20 +311,23 @@ nsfw        =EXCLUDED.nsfw",
 	}
 
 	pub async fn find_user(&self, name: &str) -> Result<Option<User>, Box<dyn Error>> {
-		let result =
-			sqlx::query_as("SELECT id, username, password_hash FROM users WHERE username = $1;")
-				.bind(name)
-				.fetch_optional(&self.pool)
-				.await?;
+		let result = sqlx::query_as(
+			"SELECT id, username, password_hash, has_import_privileges FROM users WHERE username = $1;",
+		)
+		.bind(name)
+		.fetch_optional(&self.pool)
+		.await?;
 
 		Ok(result)
 	}
 
 	pub async fn find_user_by_id(&self, id: i32) -> Result<Option<User>, Box<dyn Error>> {
-		let result = sqlx::query_as("SELECT id, username, password_hash FROM users WHERE id = $1;")
-			.bind(id)
-			.fetch_optional(&self.pool)
-			.await?;
+		let result = sqlx::query_as(
+			"SELECT id, username, password_hash, has_import_privileges FROM users WHERE id = $1;",
+		)
+		.bind(id)
+		.fetch_optional(&self.pool)
+		.await?;
 
 		Ok(result)
 	}

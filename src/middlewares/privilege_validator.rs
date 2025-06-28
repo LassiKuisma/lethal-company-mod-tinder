@@ -69,11 +69,10 @@ where
 				user
 			};
 
-			// TODO:
-			if user.username != "admin" {
-				let err =
-					actix_web::error::ErrorUnauthorized("You don't have permission to use this");
-				return Err(err);
+			if !user.has_import_privileges {
+				return Err(actix_web::error::ErrorUnauthorized(
+					"You don't have permission to use this",
+				));
 			}
 
 			let fut = srv.call(req);
