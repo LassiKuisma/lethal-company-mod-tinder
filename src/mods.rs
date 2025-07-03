@@ -149,39 +149,55 @@ impl ModRaw {
 	}
 }
 
-#[allow(dead_code)]
-pub async fn refresh_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
-	let options = env.mod_refresh_options.clone();
-
-	let should_update_cache = match options {
-		ModRefreshOptions::ForceDownload => true,
-		ModRefreshOptions::CacheOnly => false,
-		ModRefreshOptions::NoRefresh => false,
-		ModRefreshOptions::DownloadIfExpired(duration) => {
-			let last_import = db.latest_mod_import_date().await?;
-			let now = UtcDateTime::now().date();
-			is_expired(last_import, now, duration)
-		}
-	};
-
-	if should_update_cache {
-		let mods_json = load_mods_json()?;
-		save_mods_to_cache(&mods_json)?;
-		db.set_mods_imported_date(UtcDateTime::now().date()).await?;
-	}
-
-	// do "cache -> db" if we updated cache, or if user requested a cache-only treatment
-	let should_update_db = should_update_cache || options == ModRefreshOptions::CacheOnly;
-
-	if should_update_db {
-		let mods = load_mods_from_cache()?;
-		save_mods_to_db(db, &mods, env).await?;
+pub async fn import_mods_if_expired(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
+	if are_mods_expired(db, env).await? {
+		do_import_mods(db, env).await?;
 	}
 
 	Ok(())
 }
 
-fn load_mods_json() -> Result<String, Box<dyn Error>> {
+pub async fn are_mods_expired(db: &Database, env: &Env) -> Result<bool, Box<dyn Error>> {
+	let options = env.mod_refresh_options.clone();
+
+	let duration = match options {
+		ModRefreshOptions::NoRefresh => return Ok(false),
+		ModRefreshOptions::CacheOnly(duration) => duration,
+		ModRefreshOptions::DownloadIfExpired(duration) => duration,
+	};
+
+	let last_import = db.latest_mod_import_date().await?;
+	let now = UtcDateTime::now().date();
+	let result = is_expired(last_import, now, duration);
+
+	return Ok(result);
+}
+
+pub async fn do_import_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Error>> {
+	let options = env.mod_refresh_options.clone();
+
+	if options == ModRefreshOptions::NoRefresh {
+		return Ok(());
+	}
+
+	let should_download_mods = match options {
+		ModRefreshOptions::DownloadIfExpired(_) => true,
+		_ => false,
+	};
+
+	if should_download_mods {
+		let mods_json = download_mods_json()?;
+		save_mods_to_cache(&mods_json)?;
+	}
+
+	let mods = load_mods_from_cache()?;
+	save_mods_to_db(db, &mods, env).await?;
+	db.set_mods_imported_date(UtcDateTime::now().date()).await?;
+
+	Ok(())
+}
+
+fn download_mods_json() -> Result<String, Box<dyn Error>> {
 	assert!(!cfg!(test), "Trying to load mod cache in tests");
 
 	let mut buffer = Vec::new();
@@ -258,9 +274,8 @@ fn is_expired(last_import: Option<Date>, now: Date, expiration_duration: Duratio
 #[allow(dead_code)]
 #[derive(PartialEq, Eq, Clone)]
 pub enum ModRefreshOptions {
-	ForceDownload,
-	CacheOnly,
 	NoRefresh,
+	CacheOnly(Duration),
 	DownloadIfExpired(Duration),
 }
 
