@@ -32,7 +32,10 @@ async fn home_page(
 	let mut ctx = Context::new();
 
 	match db.find_user_by_id(req_user.id).await {
-		Ok(Some(user)) => ctx.insert("username", &user.username),
+		Ok(Some(user)) => {
+			ctx.insert("username", &user.username);
+			ctx.insert("can_import", &user.has_import_privileges);
+		}
 		Ok(None) => {
 			let response = HttpResponse::BadRequest()
 				.insert_header(header_redirect_to("/login-error"))
