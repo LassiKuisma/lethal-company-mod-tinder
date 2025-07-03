@@ -9,6 +9,7 @@
   <body>
     <div id="root">
       <h1>Import mods?</h1>
+      <p>Previous import: {{ latest_import }}</p>
       <form action="/import-mods" method="post" class="vertical-container">
         <button type="submit">Yes</button>
         <a href="/">No</a>
