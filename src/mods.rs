@@ -11,7 +11,7 @@ use async_curl::{Actor, CurlActor};
 use curl::easy::{Easy2, Handler, WriteError};
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
-use time::{Date, UtcDateTime, format_description::well_known::Iso8601};
+use time::{Date, OffsetDateTime, format_description::well_known::Iso8601};
 use uuid::Uuid;
 
 use crate::{
@@ -169,7 +169,7 @@ pub async fn are_mods_expired(db: &Database, env: &Env) -> Result<bool, Box<dyn 
 	};
 
 	let last_import = db.latest_mod_import_date().await?;
-	let now = UtcDateTime::now().date();
+	let now = OffsetDateTime::now_utc();
 	let result = is_expired(last_import, now, duration);
 
 	return Ok(result);
@@ -194,7 +194,7 @@ pub async fn do_import_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Erro
 
 	let mods = load_mods_from_cache()?;
 	save_mods_to_db(db, &mods, env).await?;
-	db.set_mods_imported_date(UtcDateTime::now().date()).await?;
+	db.set_mods_imported_date(OffsetDateTime::now_utc()).await?;
 
 	Ok(())
 }
@@ -260,7 +260,11 @@ fn load_mods_from_cache() -> Result<Mods, Box<dyn Error>> {
 	Ok(mods)
 }
 
-fn is_expired(last_import: Option<Date>, now: Date, expiration_duration: Duration) -> bool {
+fn is_expired(
+	last_import: Option<OffsetDateTime>,
+	now: OffsetDateTime,
+	expiration_duration: Duration,
+) -> bool {
 	if let Some(last_import) = last_import {
 		let time_passed = now - last_import;
 		time_passed > expiration_duration

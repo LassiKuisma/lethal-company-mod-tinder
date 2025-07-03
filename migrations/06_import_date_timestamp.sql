@@ -1,0 +1,3 @@
+ALTER TABLE mods_imported_date
+  ALTER date TYPE TIMESTAMP WITH TIME ZONE,
+  ALTER date SET NOT NULL;
