@@ -13,11 +13,12 @@ pub struct ImportStatus {
 
 #[get("/import-mods", wrap = "PrivilegeValidator", wrap = "TokenValidator")]
 pub async fn import_mods_page(import_status: Data<Mutex<ImportStatus>>) -> impl Responder {
-	let import_status = import_status.lock().unwrap();
-	let already_requested = import_status.import_requested;
-	let in_progress = import_status.import_in_progress;
+	let import_in_progress = {
+		let import_status = import_status.lock().unwrap();
+		import_status.import_requested || import_status.import_in_progress
+	};
 
-	if already_requested || in_progress {
+	if import_in_progress {
 		return NamedFile::open("static/import_in_progress.html");
 	}
 
