@@ -3,10 +3,12 @@ use std::{
 	error::Error,
 	fmt::Display,
 	path::Path,
-	time::{Duration, Instant},
+	string::FromUtf8Error,
+	time::Duration,
 };
 
-use curl::easy::Easy;
+use async_curl::{Actor, CurlActor};
+use curl::easy::{Easy2, Handler, WriteError};
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
 use time::{Date, UtcDateTime, format_description::well_known::Iso8601};
@@ -186,7 +188,7 @@ pub async fn do_import_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Erro
 	};
 
 	if should_download_mods {
-		let mods_json = download_mods_json()?;
+		let mods_json = download_mods_json().await?;
 		save_mods_to_cache(&mods_json)?;
 	}
 
@@ -197,47 +199,44 @@ pub async fn do_import_mods(db: &Database, env: &Env) -> Result<(), Box<dyn Erro
 	Ok(())
 }
 
-fn download_mods_json() -> Result<String, Box<dyn Error>> {
-	assert!(!cfg!(test), "Trying to load mod cache in tests");
+#[derive(Debug, Clone, Default)]
+pub struct ResponseHandler {
+	data: Vec<u8>,
+}
 
-	let mut buffer = Vec::new();
-	let mut easy = Easy::new();
-	easy.url(THUNDERSTORE_API_URL)?;
-	easy.progress(true)?;
+impl Handler for ResponseHandler {
+	fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
+		self.data.extend_from_slice(data);
+		Ok(data.len())
+	}
+}
 
-	let log_frequency = Duration::from_millis(1000);
-	log::info!("Starting mods json download");
-
-	{
-		let mut last_log = Instant::now();
-
-		let mut transfer = easy.transfer();
-		transfer.write_function(|data| {
-			buffer.extend_from_slice(data);
-			Ok(data.len())
-		})?;
-
-		transfer.progress_function(|total_expected, downloaded, _total_upload, _uploaded| {
-			if last_log.elapsed() < log_frequency {
-				return true;
-			}
-
-			last_log = Instant::now();
-
-			let percent = if total_expected != 0.0 {
-				downloaded * 100.0 / total_expected
-			} else {
-				0.0
-			};
-			log::debug!("{downloaded} / {total_expected} ({percent}%) downloaded");
-
-			true
-		})?;
-
-		transfer.perform()?;
+impl ResponseHandler {
+	fn new() -> Self {
+		Self::default()
 	}
 
-	let result = String::from_utf8(buffer)?;
+	fn to_string(self) -> Result<String, FromUtf8Error> {
+		String::from_utf8(self.data)
+	}
+}
+
+async fn download_mods_json() -> Result<String, Box<dyn Error>> {
+	assert!(!cfg!(test), "Trying to load mod cache in tests");
+
+	let mut easy = Easy2::new(ResponseHandler::new());
+	easy.url(THUNDERSTORE_API_URL)?;
+	easy.get(true)?;
+
+	log::info!("Starting mods json download");
+	let actor = CurlActor::new();
+	let result = actor
+		.send_request(easy)
+		.await?
+		.get_ref()
+		.to_owned()
+		.to_string()?;
+
 	Ok(result)
 }
 
