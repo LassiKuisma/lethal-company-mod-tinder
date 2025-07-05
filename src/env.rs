@@ -4,6 +4,7 @@ use log::LevelFilter;
 
 use crate::mods::ModRefreshOptions;
 
+#[derive(Clone)]
 pub struct Env {
 	pub port: u16,
 	pub log_level: LevelFilter,
@@ -77,22 +78,26 @@ fn mod_refresh_options(vars: &HashMap<String, String>) -> ModRefreshOptions {
 		.expect("Missing .env variable: MOD_REFRESH")
 		.as_str();
 
-	match str {
-		"always-download" => ModRefreshOptions::ForceDownload,
-		"cache-only" => ModRefreshOptions::CacheOnly,
-		"none" => ModRefreshOptions::NoRefresh,
-		"download-if-expired" => {
-			let expiration_time = vars
-				.get("MOD_EXPIRATION_TIME_HOURS")
-				.expect("Missing .env variable: MOD_EXPIRATION_TIME_HOURS");
-			let expiration_time = expiration_time.parse::<u64>().expect(&format!(
-				"MOD_EXPIRATION_TIME_HOURS is not a valid number: '{expiration_time}'"
-			));
+	let err_msg_missing_interval = "Missing .env variable: MOD_IMPORT_INTERVAL_HOURS";
+	let import_interval_secs = vars
+		.get("MOD_IMPORT_INTERVAL_HOURS")
+		.map(|str| {
+			str.parse::<u64>().expect(&format!(
+				"MOD_IMPORT_INTERVAL_HOURS is not a valid number: '{str}'"
+			))
+		})
+		.map(|hours| hours * 60 * 60);
 
-			ModRefreshOptions::DownloadIfExpired(Duration::from_secs(expiration_time * 60 * 60))
-		}
+	match str {
+		"none" => ModRefreshOptions::NoRefresh,
+		"cache-only" => ModRefreshOptions::CacheOnly(Duration::from_secs(
+			import_interval_secs.expect(err_msg_missing_interval),
+		)),
+		"expiration" => ModRefreshOptions::DownloadIfExpired(Duration::from_secs(
+			import_interval_secs.expect(err_msg_missing_interval),
+		)),
 		_ => panic!(
-			"Not a valid mod refresh option: '{str}'. Allowed values are: always-download, download-if-expired, cache-only, none"
+			"Not a valid mod refresh option: '{str}'. Allowed values are: expiration, cache-only, none"
 		),
 	}
 }

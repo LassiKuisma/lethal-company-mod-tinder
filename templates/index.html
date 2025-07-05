@@ -13,6 +13,9 @@
       <a href="settings">Settings</a>
       <a href="rate">Start rating mods</a>
       <a href="likes">View your liked mods</a>
+      {% if can_import %}
+      <a href="import-mods">Refresh mods data</a>
+      {% endif %}
       <a href="logout">Logout</a>
       {% else %}
       <h1>Welcome to Lethal Company mod tinder!</h1>

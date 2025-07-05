@@ -1,7 +1,7 @@
 use std::{collections::HashSet, error::Error};
 
 use sqlx::{FromRow, Pool, Postgres, QueryBuilder, Row, postgres::PgPoolOptions};
-use time::Date;
+use time::{Date, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::{
@@ -234,13 +234,13 @@ nsfw        =EXCLUDED.nsfw",
 		Ok(())
 	}
 
-	pub async fn latest_mod_import_date(&self) -> Result<Option<Date>, Box<dyn Error>> {
+	pub async fn latest_mod_import_date(&self) -> Result<Option<OffsetDateTime>, Box<dyn Error>> {
 		let result = sqlx::query("SELECT date FROM mods_imported_date WHERE id = 0;")
 			.fetch_optional(&self.pool)
 			.await?;
 
 		if let Some(row) = result {
-			let date = row.try_get::<Date, _>("date")?;
+			let date = row.try_get::<OffsetDateTime, _>("date")?;
 			Ok(Some(date))
 		} else {
 			// query was ok, but no data found -> no updates have been done to db
@@ -248,7 +248,7 @@ nsfw        =EXCLUDED.nsfw",
 		}
 	}
 
-	pub async fn set_mods_imported_date(&self, date: Date) -> Result<(), Box<dyn Error>> {
+	pub async fn set_mods_imported_date(&self, date: OffsetDateTime) -> Result<(), Box<dyn Error>> {
 		sqlx::query("INSERT INTO mods_imported_date (id, date) VALUES (0, $1) ON CONFLICT(id) DO UPDATE SET date = EXCLUDED.date;")
 			.bind(date)
 			.execute(&self.pool)
@@ -301,7 +301,7 @@ nsfw        =EXCLUDED.nsfw",
 	/// return the created user on success, return None if username was already taken
 	pub async fn insert_user(&self, user: &UserNoId) -> Result<Option<User>, Box<dyn Error>> {
 		let result = sqlx::query_as(
-			"INSERT INTO users(username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id, username, password_hash;",
+			"INSERT INTO users(username, password_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id, username, password_hash, has_import_privileges;",
 		)
 		.bind(&user.username)
 		.bind(&user.password_hash)
@@ -311,20 +311,23 @@ nsfw        =EXCLUDED.nsfw",
 	}
 
 	pub async fn find_user(&self, name: &str) -> Result<Option<User>, Box<dyn Error>> {
-		let result =
-			sqlx::query_as("SELECT id, username, password_hash FROM users WHERE username = $1;")
-				.bind(name)
-				.fetch_optional(&self.pool)
-				.await?;
+		let result = sqlx::query_as(
+			"SELECT id, username, password_hash, has_import_privileges FROM users WHERE username = $1;",
+		)
+		.bind(name)
+		.fetch_optional(&self.pool)
+		.await?;
 
 		Ok(result)
 	}
 
 	pub async fn find_user_by_id(&self, id: i32) -> Result<Option<User>, Box<dyn Error>> {
-		let result = sqlx::query_as("SELECT id, username, password_hash FROM users WHERE id = $1;")
-			.bind(id)
-			.fetch_optional(&self.pool)
-			.await?;
+		let result = sqlx::query_as(
+			"SELECT id, username, password_hash, has_import_privileges FROM users WHERE id = $1;",
+		)
+		.bind(id)
+		.fetch_optional(&self.pool)
+		.await?;
 
 		Ok(result)
 	}
@@ -558,7 +561,8 @@ mod tests {
 	async fn set_and_get_mod_import_date(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let timestamp = Date::parse("2025-03-22T12:45:56.001122Z", &Iso8601::DEFAULT).unwrap();
+		let timestamp =
+			OffsetDateTime::parse("2025-03-22T12:45:56.001122Z", &Iso8601::DEFAULT).unwrap();
 		db.set_mods_imported_date(timestamp).await.unwrap();
 
 		let date = db.latest_mod_import_date().await.unwrap().unwrap();
@@ -569,9 +573,9 @@ mod tests {
 	async fn set_mod_import_date_multiple_times(pool: Pool<Postgres>) {
 		let db = Database { pool };
 
-		let old = Date::parse("2000-01-01T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
-		let mid = Date::parse("2002-02-22T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
-		let new = Date::parse("2025-03-03T03:03:03.000000Z", &Iso8601::DEFAULT).unwrap();
+		let old = OffsetDateTime::parse("2000-01-01T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
+		let mid = OffsetDateTime::parse("2002-02-22T00:00:00.000000Z", &Iso8601::DEFAULT).unwrap();
+		let new = OffsetDateTime::parse("2025-03-03T03:03:03.000000Z", &Iso8601::DEFAULT).unwrap();
 
 		db.set_mods_imported_date(old).await.unwrap();
 		db.set_mods_imported_date(mid).await.unwrap();

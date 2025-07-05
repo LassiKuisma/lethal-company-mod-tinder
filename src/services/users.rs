@@ -2,13 +2,9 @@ use std::sync::Mutex;
 
 use actix_files::NamedFile;
 use actix_web::{
-	Either, HttpMessage, HttpResponse, Responder,
-	body::{BoxBody, MessageBody},
+	Either, HttpResponse, Responder,
 	cookie::Cookie,
-	dev::{ServiceRequest, ServiceResponse},
-	get,
-	middleware::Next,
-	post,
+	get, post,
 	web::{Data, Form, Html},
 };
 use argon2::{
@@ -16,19 +12,20 @@ use argon2::{
 	password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use hmac::{Hmac, Mac};
-use jwt::{SignWithKey, VerifyWithKey};
+use jwt::SignWithKey;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use sqlx::prelude::FromRow;
 use tera::{Context, Tera};
 
-use crate::{db::Database, services::header_redirect_to};
+use crate::{db::Database, middlewares::TokenValidator, services::header_redirect_to};
 
 #[derive(FromRow, Debug)]
 pub struct User {
 	pub id: i32,
 	pub username: String,
 	pub password_hash: String,
+	pub has_import_privileges: bool,
 }
 
 #[derive(Debug)]
@@ -40,40 +37,6 @@ pub struct UserNoId {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TokenClaims {
 	pub id: i32,
-}
-
-pub async fn validator(
-	req: ServiceRequest,
-	next: Next<BoxBody>,
-) -> Result<ServiceResponse<impl MessageBody>, actix_web::Error> {
-	let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET is not set");
-	let key: Hmac<Sha256> = Hmac::new_from_slice(jwt_secret.as_bytes()).unwrap();
-
-	let token_claims = req
-		.cookie("lcmt-login")
-		.map(|cookie| {
-			let token_string = cookie.value();
-			let claims: Result<TokenClaims, _> = token_string.verify_with_key(&key);
-
-			claims.ok()
-		})
-		.flatten();
-
-	match token_claims {
-		Some(value) => {
-			req.extensions_mut().insert(value);
-		}
-		// token is either invalid or missing
-		None => {
-			let response = HttpResponse::Ok()
-				.insert_header(header_redirect_to("/login"))
-				.finish();
-
-			return Ok(req.into_response(response));
-		}
-	}
-
-	next.call(req).await
 }
 
 #[derive(Deserialize)]
@@ -213,12 +176,12 @@ async fn get_login_page(
 	Ok(Html::new(html))
 }
 
-#[get("/logout")]
+#[get("/logout", wrap = "TokenValidator")]
 async fn logout_page() -> impl Responder {
 	NamedFile::open("static/logout.html")
 }
 
-#[post("/logout")]
+#[post("/logout", wrap = "TokenValidator")]
 async fn logout() -> impl Responder {
 	let mut clear_login = Cookie::new("lcmt-login", "");
 	clear_login.make_removal();

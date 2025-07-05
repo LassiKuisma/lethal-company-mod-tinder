@@ -12,17 +12,18 @@ use actix_web::{
 use tera::{Context, Tera};
 use users::TokenClaims;
 
-use crate::db::Database;
+use crate::{db::Database, middlewares::TokenValidator};
 
+pub mod import_mods;
 pub mod ratings;
-pub mod users;
 pub mod settings;
+pub mod users;
 
-fn header_redirect_to(to_url: &str) -> impl TryIntoHeaderPair {
+pub fn header_redirect_to(to_url: &str) -> impl TryIntoHeaderPair {
 	(header::REFRESH, format!("0; url={to_url}"))
 }
 
-#[get("/")]
+#[get("/", wrap = "TokenValidator")]
 async fn home_page(
 	template: Data<Mutex<Tera>>,
 	db: Data<Database>,
@@ -31,7 +32,10 @@ async fn home_page(
 	let mut ctx = Context::new();
 
 	match db.find_user_by_id(req_user.id).await {
-		Ok(Some(user)) => ctx.insert("username", &user.username),
+		Ok(Some(user)) => {
+			ctx.insert("username", &user.username);
+			ctx.insert("can_import", &user.has_import_privileges);
+		}
 		Ok(None) => {
 			let response = HttpResponse::BadRequest()
 				.insert_header(header_redirect_to("/login-error"))

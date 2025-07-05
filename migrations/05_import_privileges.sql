@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN has_import_privileges BOOLEAN DEFAULT FALSE;
